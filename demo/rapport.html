@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Suivi Horaire — Rapport détaillé</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #1e293b;
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .cover {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    page-break-after: always;
+  }
+  .cover .badge {
+    background: #4f46e5;
+    color: white;
+    width: 72px; height: 72px;
+    border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px; font-weight: 700;
+    margin-bottom: 24px;
+  }
+  .cover h1 { font-size: 32px; margin: 0 0 8px; color: #0f172a; }
+  .cover p.subtitle { font-size: 15px; color: #64748b; margin: 0 0 32px; }
+  .cover .meta { font-size: 12px; color: #94a3b8; margin-top: 60px; }
+
+  section { page-break-after: always; padding-top: 4px; }
+  section:last-child { page-break-after: auto; }
+
+  h2.section-title {
+    font-size: 19px;
+    color: #4f46e5;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  h3 { font-size: 14px; color: #0f172a; margin: 16px 0 6px; }
+  p { margin: 6px 0; }
+
+  ul, ol { margin: 6px 0 12px; padding-left: 20px; }
+  li { margin-bottom: 4px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 11.5px; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #eef2ff; color: #4338ca; }
+  tr:nth-child(even) td { background: #f8fafc; }
+
+  code {
+    background: #f1f5f9; color: #4338ca; padding: 1px 5px; border-radius: 4px;
+    font-family: 'Consolas', monospace; font-size: 11px;
+  }
+
+  .badge-role {
+    display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 10.5px; font-weight: 600;
+  }
+  .badge-admin { background: #eef2ff; color: #4338ca; }
+  .badge-emp { background: #ecfdf5; color: #047857; }
+  .badge-acc { background: #fff7ed; color: #c2410c; }
+
+  .note-box {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 10px 14px; font-size: 11.5px; margin: 12px 0; color: #92400e;
+  }
+  .toc { padding-left: 0; list-style: none; }
+  .toc li { margin-bottom: 10px; font-size: 13px; }
+  .toc li span.num {
+    display: inline-block; width: 22px; color: #4f46e5; font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+  <!-- COVER -->
+  <div class="cover">
+    <div class="badge">SH</div>
+    <h1>Suivi Horaire</h1>
+    <p class="subtitle">Rapport technique et fonctionnel détaillé</p>
+    <div class="meta">ELENI - Consulting · Document interne</div>
+  </div>
+
+  <!-- SOMMAIRE -->
+  <section>
+    <h2 class="section-title">Sommaire</h2>
+    <ol class="toc">
+      <li><span class="num">1.</span>Contexte et objectifs</li>
+      <li><span class="num">2.</span>Stack technique</li>
+      <li><span class="num">3.</span>Rôles et permissions</li>
+      <li><span class="num">4.</span>Modèle de données</li>
+      <li><span class="num">5.</span>Modules fonctionnels détaillés</li>
+      <li><span class="num">6.</span>Sécurité</li>
+      <li><span class="num">7.</span>Architecture technique</li>
+      <li><span class="num">8.</span>Limites actuelles et pistes d'évolution</li>
+    </ol>
+  </section>
+
+  <!-- 1. CONTEXTE -->
+  <section>
+    <h2 class="section-title">1. Contexte et objectifs</h2>
+    <p>
+      <strong>Suivi Horaire</strong> est une application web interne développée pour remplacer le suivi des heures
+      sur feuille Excel par un outil centralisé, fiable et accessible à toute l'équipe. Elle couvre trois besoins
+      principaux :
+    </p>
+    <ul>
+      <li><strong>Suivi du temps de travail</strong> : pointage quotidien, calcul automatique des heures, respect des horaires cibles par employé.</li>
+      <li><strong>Gestion des absences</strong> : congés, maladie, jours fériés et jours de repos, avec décompte automatique des soldes.</li>
+      <li><strong>Gestion documentaire RH</strong> : fiches de paie, CV, justificatifs, centralisés et accessibles selon le rôle de l'utilisateur.</li>
+    </ul>
+    <p>
+      L'application vise trois profils d'utilisateurs : les <strong>employés</strong>, l'<strong>administrateur RH</strong>,
+      et les <strong>comptables</strong> qui ont besoin d'une vue en lecture seule pour la paie.
+    </p>
+  </section>
+
+  <!-- 2. STACK -->
+  <section>
+    <h2 class="section-title">2. Stack technique</h2>
+    <table>
+      <tr><th>Composant</th><th>Technologie</th></tr>
+      <tr><td>Framework</td><td>Next.js 16 (App Router, Server Components, Server Actions)</td></tr>
+      <tr><td>Langage</td><td>TypeScript</td></tr>
+      <tr><td>UI</td><td>React 19, Tailwind CSS, composants type shadcn/ui, icônes Lucide</td></tr>
+      <tr><td>Stockage des données</td><td>Fichier JSON local (<code>data/db.json</code>) — base de données légère adaptée à une petite équipe</td></tr>
+      <tr><td>Authentification</td><td>Sessions par cookie, mots de passe hashés (scrypt + sel), middleware de contrôle d'accès (<code>src/proxy.ts</code>)</td></tr>
+      <tr><td>QR Code</td><td>Génération de QR codes uniques par employé pour le pointage sans connexion</td></tr>
+      <tr><td>Documents</td><td>Upload de fichiers stockés sur disque (<code>data/uploads</code>), servis via une route API sécurisée</td></tr>
+    </table>
+    <p>
+      L'ensemble du code est organisé en modules clairs : <code>src/app</code> (pages), <code>src/components</code>
+      (UI), <code>src/lib/queries.ts</code> (accès aux données), <code>src/lib/actions</code> (actions serveur/formulaires).
+    </p>
+  </section>
+
+  <!-- 3. ROLES -->
+  <section>
+    <h2 class="section-title">3. Rôles et permissions</h2>
+    <table>
+      <tr><th>Rôle</th><th>Peut faire</th><th>Ne peut pas faire</th></tr>
+      <tr>
+        <td><span class="badge-role badge-admin">Administrateur</span></td>
+        <td>
+          Créer/modifier/désactiver des employés et comptables ; corriger manuellement les heures ; gérer le
+          calendrier d'équipe (fériés, repos) ; définir les soldes de congés ; uploader les fiches de paie ;
+          générer les badges QR ; consulter tous les documents.
+        </td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td><span class="badge-role badge-emp">Employé</span></td>
+        <td>
+          Pointer arrivée/départ (bouton ou QR code) ; consulter ses heures, son calendrier et ses soldes de congés ;
+          déposer ses propres documents (CV, justificatifs) ; consulter ses fiches de paie.
+        </td>
+        <td>
+          Modifier manuellement une entrée d'heures (verrouillé côté serveur) ; consulter les données d'un autre
+          employé.
+        </td>
+      </tr>
+      <tr>
+        <td><span class="badge-role badge-acc">Comptable</span></td>
+        <td>Consulter en lecture seule les heures et soldes de congés de tous les employés.</td>
+        <td>Modifier quoi que ce soit ; accéder aux documents personnels des employés.</td>
+      </tr>
+    </table>
+    <div class="note-box">
+      Toutes les actions serveur (<code>src/lib/actions/*.ts</code>) revérifient le rôle de l'utilisateur côté
+      serveur (via <code>requireAdmin()</code> / <code>requireUser()</code>), indépendamment de ce qui est affiché
+      côté interface — la sécurité ne repose donc pas uniquement sur le masquage des boutons.
+    </div>
+  </section>
+
+  <!-- 4. MODELE DE DONNEES -->
+  <section>
+    <h2 class="section-title">4. Modèle de données</h2>
+    <table>
+      <tr><th>Entité</th><th>Description</th></tr>
+      <tr><td><code>profiles</code></td><td>Employés, admin et comptables : identité, rôle, société, fonction, heures cibles hebdomadaires, jeton QR unique, statut actif/inactif.</td></tr>
+      <tr><td><code>timeEntries</code></td><td>Une entrée par jour et par employé : type de journée (normal, congé, maladie, férié payé/non payé, repos), heures de début/fin, pause, heures calculées, tâches, remarques.</td></tr>
+      <tr><td><code>leaveBalances</code></td><td>Soldes annuels de congés et maladie par employé (total accordé / utilisé).</td></tr>
+      <tr><td><code>documents</code></td><td>Fichiers déposés (fiche de paie, CV, justificatif), liés à un employé, avec catégorie et date.</td></tr>
+      <tr><td><code>sessions</code></td><td>Sessions de connexion actives (jeton, expiration).</td></tr>
+    </table>
+    <p>
+      Le calcul des heures (<code>src/lib/hours.ts</code>) applique une logique reproduisant le tableau Excel
+      d'origine : congé/maladie/férié payé comptent pour les heures standard du jour de la semaine ; férié non
+      payé/repos comptent 0h ; sinon les heures sont calculées à partir de l'heure de fin moins l'heure de début
+      moins la pause.
+    </p>
+  </section>
+
+  <!-- 5. MODULES -->
+  <section>
+    <h2 class="section-title">5. Modules fonctionnels détaillés</h2>
+
+    <h3>5.1 Pointage</h3>
+    <p>
+      Deux méthodes de pointage : un bouton "Arrivée / Départ" sur le tableau de bord employé, ou le scan d'un
+      QR code personnel imprimable (page publique <code>/checkin/[token]</code>, sans connexion requise). Le
+      premier scan enregistre l'heure d'arrivée, le second l'heure de départ. Les heures ne sont jamais
+      modifiables par l'employé lui-même — seul l'administrateur peut corriger une anomalie.
+    </p>
+
+    <h3>5.2 Calendrier d'équipe et jours fériés</h3>
+    <p>
+      Vue calendaire annuelle avec code couleur par type de journée. L'administrateur peut appliquer un type
+      (férié payé/non payé, repos) à toute l'équipe pour une date donnée en un clic. Un bouton d'import automatique
+      applique en une seule opération les jours fériés fixes tunisiens (Indépendance, Fête du Travail, République,
+      Martyrs, Évacuation, etc.) pour tous les employés et l'année sélectionnée. Les fêtes religieuses mobiles
+      (Aïd, Mawlid...) restent à ajouter manuellement car elles suivent le calendrier lunaire.
+    </p>
+
+    <h3>5.3 Congés et maladie</h3>
+    <p>
+      Chaque employé dispose d'un solde annuel de jours de congé et de maladie, configurable par l'administrateur.
+      Le nombre de jours utilisés est calculé automatiquement à partir des entrées de calendrier de type congé/maladie.
+    </p>
+
+    <h3>5.4 Documents</h3>
+    <p>
+      Trois catégories de documents : fiches de paie (déposées par l'administrateur), CV et justificatifs
+      (déposés par l'employé). Le téléchargement passe par une route API qui vérifie les droits d'accès avant de
+      servir le fichier.
+    </p>
+
+    <h3>5.5 Gestion administrative</h3>
+    <p>
+      Création de comptes employés/comptables avec mot de passe temporaire, activation/désactivation, définition
+      des horaires cibles hebdomadaires, génération de badges QR imprimables, impression du planning mensuel par
+      employé, recherche dans la liste des employés.
+    </p>
+
+    <h3>5.6 Accès comptable</h3>
+    <p>
+      Un comptable dispose d'un compte en lecture seule permettant de consulter les heures et congés de l'ensemble
+      de l'équipe, sans pouvoir les modifier ni accéder aux documents personnels.
+    </p>
+  </section>
+
+  <!-- 6. SECURITE -->
+  <section>
+    <h2 class="section-title">6. Sécurité</h2>
+    <ul>
+      <li>Mots de passe hashés avec sel aléatoire (<code>scrypt</code>), jamais stockés en clair.</li>
+      <li>Sessions par cookie avec jeton opaque et expiration côté serveur.</li>
+      <li>Middleware (<code>src/proxy.ts</code>) qui bloque l'accès aux pages protégées sans session valide, et redirige les utilisateurs déjà connectés hors de la page de connexion.</li>
+      <li>Chaque action serveur revalide le rôle de l'appelant, indépendamment de l'interface affichée.</li>
+      <li>Les pages de pointage QR sont publiques par nécessité (pas de connexion requise pour badger), mais n'exposent que la fonction de pointage — aucune donnée sensible n'est accessible sans authentification.</li>
+      <li>Les employés ne peuvent pas modifier leurs propres heures : cette règle est appliquée côté serveur, pas seulement masquée dans l'interface.</li>
+    </ul>
+  </section>
+
+  <!-- 7. ARCHITECTURE -->
+  <section>
+    <h2 class="section-title">7. Architecture technique</h2>
+    <p>
+      L'application suit l'architecture App Router de Next.js : les pages sont des composants serveur qui lisent
+      directement les données via <code>src/lib/queries.ts</code>, et les mutations (création, mise à jour,
+      suppression) passent par des actions serveur dédiées dans <code>src/lib/actions/</code>, invoquées depuis des
+      formulaires ou des boutons côté client.
+    </p>
+    <p>
+      La base de données JSON est lue une seule fois par requête grâce à une mémoïsation au niveau de la requête
+      (<code>React.cache</code>), ce qui évite de relire et re-parser le fichier à chaque appel lorsque plusieurs
+      informations sont nécessaires sur une même page (par exemple la fiche détaillée d'un employé qui combine
+      profil, heures, congés et documents).
+    </p>
+    <p>
+      Les opérations en masse (par exemple l'import des jours fériés pour tous les employés) sont regroupées pour
+      n'effectuer qu'une seule lecture et une seule écriture disque, plutôt qu'une opération par employé.
+    </p>
+  </section>
+
+  <!-- 8. LIMITES -->
+  <section>
+    <h2 class="section-title">8. Limites actuelles et pistes d'évolution</h2>
+    <ul>
+      <li><strong>Stockage fichier JSON</strong> : adapté à une petite équipe ; une migration vers une base de données relationnelle serait recommandée en cas de forte croissance du nombre d'employés ou d'accès concurrents intensifs.</li>
+      <li><strong>Fêtes religieuses mobiles</strong> : non calculées automatiquement (calendrier lunaire), ajout manuel nécessaire chaque année.</li>
+      <li><strong>Notifications</strong> : pas d'alertes automatiques (ex. retard de pointage, oubli de départ) — évolution possible.</li>
+      <li><strong>Rapports/export</strong> : pas d'export Excel/CSV des heures à ce stade — évolution possible pour la paie.</li>
+      <li><strong>Multi-société</strong> : la notion de société existe par profil, mais il n'y a pas de séparation stricte multi-tenant.</li>
+    </ul>
+    <p style="margin-top:20px; font-size:11px; color:#94a3b8; font-style:italic;">
+      Rapport généré comme document de référence interne — à mettre à jour au fil des évolutions de l'application.
+    </p>
+  </section>
+
+</body>
+</html>

@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Suivi Horaire — App RH
 
-## Getting Started
+Application web de suivi des heures de travail, congés et maladie, inspirée du fichier Excel `Administration - Suivi horaire`. Multi-employés, avec espace **Admin RH** et espace **Employé**.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Next.js 16** (App Router, Server Actions, TypeScript)
+- **Supabase** (Postgres + Auth) — base de données et authentification
+- **Tailwind CSS** — interface
+
+## 1. Créer le projet Supabase
+
+1. Va sur [supabase.com](https://supabase.com) → crée un projet gratuit.
+2. Dans **SQL Editor**, colle et exécute le contenu de `supabase/schema.sql` (crée les tables et les règles de sécurité).
+3. Dans **Project Settings → API**, récupère :
+   - `Project URL`
+   - `anon public` key
+   - `service_role` key (⚠️ secrète, jamais côté client)
+
+## 2. Configurer les variables d'environnement
+
+Crée un fichier `.env.local` à la racine du projet avec :
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 3. Créer le premier compte Admin RH
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Dans Supabase → **Authentication → Users → Add user**, crée un utilisateur (email + mot de passe).
+2. Copie son `UID`.
+3. Dans **SQL Editor**, exécute :
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```sql
+insert into public.profiles (id, email, full_name, role, function_title)
+values ('<UID>', 'admin@example.com', 'Admin RH', 'admin', 'Responsable RH');
+```
 
-## Learn More
+Tu peux maintenant te connecter à l'app avec cet email/mot de passe → tu arrives sur `/admin`.
 
-To learn more about Next.js, take a look at the following resources:
+## 4. Lancer en local
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Ouvre [http://localhost:3000](http://localhost:3000).
 
-## Deploy on Vercel
+## Fonctionnalités
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Admin RH** : créer/gérer des employés, définir les objectifs d'heures hebdomadaires, les heures standard par jour de semaine, les soldes congé/maladie, consulter et corriger le suivi horaire de chaque employé.
+- **Employé** : saisir ses heures quotidiennes (Présentiel/Télétravail/Congé/Maladie/Férié/Repos), voir son résumé hebdomadaire (heures vs objectif 42h), voir ses soldes de congés/maladie.
+- Calcul automatique des heures : Congé/Maladie/Férié payé → heures standard du jour ; sinon Fin − Début − Pause.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Déploiement
+
+Déployable sur Netlify ou Vercel. Pense à renseigner les 3 variables d'environnement ci-dessus dans les paramètres du site déployé.

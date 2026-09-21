@@ -7,3 +7,23 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+# Project notes
+
+## Verification
+- Typecheck: `npx tsc --noEmit`
+- Lint: `npx eslint src`
+- Build: `npm run build`
+
+## Environment variables
+- Firebase (Firestore + Storage), see `src/lib/firebase.ts`:
+  - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (service account key, from Firebase Console > Project Settings > Service accounts).
+  - `FIREBASE_STORAGE_BUCKET` (e.g. `your-project-id.appspot.com`) for documents/attachments content.
+  - `SEED_DEMO=true` to force-seed demo accounts (admin@demo.com / employe@demo.com) outside development.
+- Email notifications (`src/lib/mail.ts`, nodemailer over SMTP). If `SMTP_HOST` is missing, emails are only logged to the console:
+  - `SMTP_HOST`, `SMTP_PORT` (default 587, 465 = TLS implicit), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (e.g. `"Suivi Horaire <no-reply@example.com>"`).
+
+## Business rules
+- `computeDayHours` (`src/lib/hours.ts`): congé/maladie = standard weekday hours; férié payé = standard hours unless the employee punched in/out, then worked hours; férié non payé/repos = 0 unless punched, then worked hours.
+- Punching on a férié/repos day keeps the day type (`punchIn` in `src/lib/queries.ts`); marking a day as férié/repos keeps existing punch times (`bulkSetDayType`).
+- Emails are sent with `after()` from server actions: new non-working day (to all employees), leave request decision (to the employee), new leave request (to admins).

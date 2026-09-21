@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local data (contains real employee data, password hashes, uploaded documents)
+/data
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
