@@ -109,7 +109,7 @@ const nextConfig: NextConfig = {
         "192.168.178.129:3000",
         "127.0.0.1:53311",
         "localhost:53311",
-        "suivi-horaire.vercel.app",
+        "suivi-horaire-oussama-mabrouks-projects.vercel.app",
         // "*.vercel.app", // trop large — remplacé par l'hôte exact ci-dessus
       ],
     },
