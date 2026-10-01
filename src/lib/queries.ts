@@ -23,8 +23,9 @@ import {
   MeetingParticipant,
   MeetingAttachment,
   Message,
-  PersonalContact,
   ConversationSummary,
+  OcrDraftRow,
+  OcrDraftStatus,
 } from "./types";
 
 async function db() {
@@ -317,7 +318,6 @@ export async function deleteProfile(id: string): Promise<void> {
     deleteWhere("employeeTasks", "profile_id"),
     deleteWhere("leaveRequests", "profile_id"),
     deleteWhere("notifications", "profile_id"),
-    deleteWhere("personalContacts", "owner_id"),
   ]);
 
   // Documents : suppression du contenu dans Storage puis des métadonnées.
@@ -1055,15 +1055,6 @@ export async function listAllAccounts(): Promise<Profile[]> {
   return snap.docs.map((d) => stripPassword(mapProfileDoc(d.data()))).sort(sortByRoleThenName);
 }
 
-/** Annuaire partagé : coordonnées visibles par tous les employés actifs. */
-export async function listDirectory(): Promise<Profile[]> {
-  const snap = await (await db()).collection("profiles").get();
-  return snap.docs
-    .map((d) => stripPassword(mapProfileDoc(d.data())))
-    .filter((p) => p.active)
-    .sort(sortByRoleThenName);
-}
-
 // --- Réunions ----------------------------------------------------------------
 
 function mapMeetingData(data: FirebaseFirestore.DocumentData): Meeting {
@@ -1434,53 +1425,6 @@ export async function countUnreadMessages(profileId: string): Promise<number> {
   return unreadDirect + unreadBroadcast;
 }
 
-// --- Contacts personnels (carnet privé) ---------------------------------------
-
-function mapContactData(data: FirebaseFirestore.DocumentData): PersonalContact {
-  return {
-    id: data.id,
-    owner_id: data.owner_id,
-    full_name: data.full_name,
-    phone: data.phone ?? null,
-    email: data.email ?? null,
-    note: data.note ?? null,
-    created_at: data.created_at,
-  };
-}
-
-export async function listPersonalContacts(ownerId: string): Promise<PersonalContact[]> {
-  const snap = await (await db()).collection("personalContacts").where("owner_id", "==", ownerId).get();
-  return snap.docs.map((d) => mapContactData(d.data())).sort((a, b) => a.full_name.localeCompare(b.full_name));
-}
-
-export async function createPersonalContact(input: {
-  owner_id: string;
-  full_name: string;
-  phone: string;
-  email: string;
-  note: string;
-}): Promise<PersonalContact> {
-  const id = generateId();
-  const data = {
-    id,
-    owner_id: input.owner_id,
-    full_name: input.full_name.trim(),
-    phone: input.phone.trim() || null,
-    email: input.email.trim() || null,
-    note: input.note.trim() || null,
-    created_at: new Date().toISOString(),
-  };
-  await (await db()).collection("personalContacts").doc(id).set(data);
-  return mapContactData(data);
-}
-
-export async function deletePersonalContact(id: string, ownerId: string): Promise<void> {
-  const ref = (await db()).collection("personalContacts").doc(id);
-  const snap = await ref.get();
-  if (!snap.exists || snap.data()!.owner_id !== ownerId) return;
-  await ref.delete();
-}
-
 // --- Import d'heures historiques (CSV) -----------------------------------------
 
 export interface HistoricalHourRow {
@@ -1513,6 +1457,124 @@ export async function bulkImportTimeEntries(rows: HistoricalHourRow[]): Promise<
     count++;
   }
   return count;
+}
+
+// --- Import par scan OCR (feuille de présence papier) --------------------------
+
+function mapOcrDraftData(data: FirebaseFirestore.DocumentData): OcrDraftRow {
+  return {
+    id: data.id,
+    batch_id: data.batch_id,
+    document_id: data.document_id ?? null,
+    profile_id: data.profile_id ?? null,
+    full_name: data.full_name ?? null,
+    entry_date: data.entry_date ?? null,
+    start_time: data.start_time ?? null,
+    end_time: data.end_time ?? null,
+    break_minutes: Number(data.break_minutes ?? 0),
+    hours: Number(data.hours ?? 0),
+    raw_line: data.raw_line ?? "",
+    valid: !!data.valid,
+    issues: Array.isArray(data.issues) ? data.issues : [],
+    status: data.status,
+    created_at: data.created_at,
+  };
+}
+
+export interface CreateOcrDraftRowInput {
+  batch_id: string;
+  document_id: string | null;
+  profile_id: string | null;
+  full_name: string | null;
+  entry_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  break_minutes: number;
+  hours: number;
+  raw_line: string;
+  valid: boolean;
+  issues: string[];
+}
+
+/** Enregistre en base les lignes extraites par OCR (statut "pending") pour relecture
+ * par un administrateur : rien n'est fusionné dans l'historique des heures à ce stade. */
+export async function createOcrDraftRows(rows: CreateOcrDraftRowInput[]): Promise<OcrDraftRow[]> {
+  if (rows.length === 0) return [];
+  const firestore = await db();
+  const now = new Date().toISOString();
+  const batch = firestore.batch();
+  const created: OcrDraftRow[] = [];
+
+  for (const r of rows) {
+    const id = generateId();
+    const data = { id, ...r, status: "pending" as OcrDraftStatus, created_at: now };
+    batch.set(firestore.collection("ocrDrafts").doc(id), data);
+    created.push(mapOcrDraftData(data));
+  }
+  await batch.commit();
+  return created;
+}
+
+export async function listOcrDrafts(status?: OcrDraftStatus): Promise<OcrDraftRow[]> {
+  const base = (await db()).collection("ocrDrafts");
+  const snap = await (status ? base.where("status", "==", status) : base).get();
+  return snap.docs.map((d) => mapOcrDraftData(d.data())).sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+export async function getOcrDraftById(id: string): Promise<OcrDraftRow | null> {
+  const snap = await (await db()).collection("ocrDrafts").doc(id).get();
+  return snap.exists ? mapOcrDraftData(snap.data()!) : null;
+}
+
+export interface UpdateOcrDraftInput {
+  profile_id?: string | null;
+  full_name?: string | null;
+  entry_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  break_minutes?: number;
+  hours?: number;
+  valid?: boolean;
+  issues?: string[];
+}
+
+/** Permet à l'admin de corriger une ligne (employé, date, heures) avant de la confirmer. */
+export async function updateOcrDraft(id: string, fields: UpdateOcrDraftInput): Promise<void> {
+  await (await db()).collection("ocrDrafts").doc(id).update(fields as Record<string, unknown>);
+}
+
+export async function setOcrDraftStatus(ids: string[], status: OcrDraftStatus): Promise<void> {
+  if (ids.length === 0) return;
+  const firestore = await db();
+  const batch = firestore.batch();
+  for (const id of ids) batch.update(firestore.collection("ocrDrafts").doc(id), { status });
+  await batch.commit();
+}
+
+/**
+ * Fusionne une ligne validée par OCR avec l'entrée existante du même jour en ADDITIONNANT
+ * les heures (plutôt qu'en les remplaçant) : utile quand la feuille papier vient compléter
+ * un pointage déjà enregistré. Si aucune entrée n'existe pour ce jour, elle est créée.
+ */
+export async function addHoursToTimeEntry(
+  profileId: string,
+  date: string,
+  extra: { start_time: string | null; end_time: string | null; break_minutes: number; hours: number }
+): Promise<TimeEntry> {
+  const existing = await readTimeEntry(profileId, date);
+  const mergedHours = (existing?.hours ?? 0) + extra.hours;
+  const note = `Import scan (+${extra.hours.toFixed(2)} h)`;
+
+  return writeTimeEntry(profileId, date, {
+    day_type: existing?.day_type ?? "normal",
+    work_mode: existing?.work_mode ?? null,
+    // On garde le pointage existant s'il y en a un ; sinon on reprend celui du scan.
+    start_time: existing?.start_time ?? extra.start_time,
+    end_time: existing?.end_time ?? extra.end_time,
+    break_minutes: existing?.break_minutes ?? extra.break_minutes,
+    hours: mergedHours,
+    remarks: existing?.remarks ? `${existing.remarks}\n${note}` : note,
+  });
 }
 
 // --- Réinitialisation de mot de passe ------------------------------------------

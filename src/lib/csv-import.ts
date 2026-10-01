@@ -78,7 +78,7 @@ function normalizeKey(s: string): string {
 }
 
 /** Convertit une date écrite sous divers formats courants (ISO, JJ/MM/AAAA, JJ-MM-AAAA...) en YYYY-MM-DD. */
-function normalizeDateString(raw: string): string | null {
+export function normalizeDateString(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -89,7 +89,7 @@ function normalizeDateString(raw: string): string | null {
 }
 
 /** Convertit une heure écrite sous divers formats courants (HH:MM, 8h30, ISO...) en HH:MM. */
-function normalizeTimeString(raw: string): string | null {
+export function normalizeTimeString(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;
   let m = s.match(/T(\d{2}):(\d{2})/);
@@ -208,6 +208,9 @@ export interface CsvParseResult {
   sampleRows: string[][];
   /** true si aucune colonne email n'a été trouvée : un employé par défaut est nécessaire. */
   needsDefaultEmployee: boolean;
+  /** Nom d'employé repéré dans le fichier (ex. modèle "Suivi horaire" avec "Nom d'employé : ..."),
+   * pour pré-sélectionner l'employé par défaut côté interface. */
+  detectedEmployeeName?: string | null;
 }
 
 export function parseHoursCsv(text: string): CsvParseResult {
@@ -237,6 +240,12 @@ export async function parseHoursXlsx(buffer: Buffer): Promise<CsvParseResult> {
     return { rows: [], errors: ["Le classeur Excel ne contient aucune feuille."], detectedHeaders: [], sampleRows: [], needsDefaultEmployee: false };
   }
 
+  // Modèle "Suivi horaire" (feuille annuelle avec un bloc par mois, titres fusionnés,
+  // dates courtes sans année comme "1-janv.") : structure trop spécifique pour le
+  // détecteur générique de colonnes, on tente d'abord un parseur dédié.
+  const templateResult = parseSuiviHoraireTemplate(sheet);
+  if (templateResult && templateResult.rows.length > 0) return templateResult;
+
   const columnCount = sheet.columnCount;
   const table: string[][] = [];
   for (let r = 1; r <= sheet.rowCount; r++) {
@@ -249,10 +258,189 @@ export async function parseHoursXlsx(buffer: Buffer): Promise<CsvParseResult> {
   return parseHoursTable(table);
 }
 
+const MONTH_NAME_FR: Record<string, string> = {
+  janvier: "01",
+  fevrier: "02",
+  mars: "03",
+  avril: "04",
+  mai: "05",
+  juin: "06",
+  juillet: "07",
+  aout: "08",
+  septembre: "09",
+  octobre: "10",
+  novembre: "11",
+  decembre: "12",
+};
+
+function stripAccents(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Reconnaît un titre de bloc mensuel du type "Janvier 2026" (avec ou sans accent). */
+function parseMonthTitleFr(raw: string): { year: number; month: string } | null {
+  const m = stripAccents(raw.trim()).match(/^([a-z]+)\s+(\d{4})$/i);
+  if (!m) return null;
+  const month = MONTH_NAME_FR[m[1].toLowerCase()];
+  return month ? { year: Number(m[2]), month } : null;
+}
+
+/** Extrait le jour du mois d'une date courte sans année ("1-janv.", "14-févr.") : on
+ * fait confiance au bloc mensuel environnant pour le mois et l'année. */
+function extractDayOfMonth(raw: string): number | null {
+  const m = raw.trim().match(/^(\d{1,2})/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  return day >= 1 && day <= 31 ? day : null;
+}
+
+/** Convertit en minutes une cellule "durée" Excel (ex. pause de 00:30) affichée comme heure. */
+function durationCellToMinutes(text: string): number {
+  const time = normalizeTimeString(text);
+  if (!time) return 0;
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+/**
+ * Parseur dédié au modèle "Suivi horaire" (une feuille par année, un bloc par mois avec
+ * un titre fusionné "Mois AAAA" suivi d'un en-tête "Jour | Jour | Heures | Travail | Début |
+ * Fin | Pause | Tâches effectuées | Remarques", puis une ligne par jour du mois). Renvoie
+ * `null` si le fichier ne correspond pas à ce modèle (pas de bloc reconnu).
+ */
+function parseSuiviHoraireTemplate(sheet: ExcelJS.Worksheet): CsvParseResult | null {
+  const rowCount = sheet.rowCount;
+  const text = (r: number, c: number) => cellToText(sheet.getRow(r).getCell(c).value).trim();
+
+  const headerRows: number[] = [];
+  for (let r = 1; r <= rowCount; r++) {
+    if (
+      text(r, 3).toLowerCase() === "jour" &&
+      text(r, 4).toLowerCase() === "jour" &&
+      text(r, 5).toLowerCase().startsWith("heure") &&
+      text(r, 7).toLowerCase().startsWith("d")
+    ) {
+      headerRows.push(r);
+    }
+  }
+  if (headerRows.length === 0) return null;
+
+  // Nom de l'employé, souvent indiqué en tête de feuille : "Nom d'employé: Fatma Zalila".
+  let detectedEmployeeName: string | null = null;
+  for (let r = 1; r < headerRows[0] && !detectedEmployeeName; r++) {
+    for (let c = 1; c <= sheet.columnCount; c++) {
+      const cell = text(r, c);
+      const m = cell.match(/nom\s+d['’]employ[ée]\s*:\s*(.+)/i);
+      if (m && m[1].trim()) {
+        detectedEmployeeName = m[1].trim();
+        break;
+      }
+    }
+  }
+
+  const rows: ParsedHourRow[] = [];
+  const errors: string[] = [];
+
+  for (let b = 0; b < headerRows.length; b++) {
+    const headerRow = headerRows[b];
+    const titleRow = headerRow - 1;
+    let monthInfo: { year: number; month: string } | null = null;
+    for (let c = 1; c <= sheet.columnCount && !monthInfo; c++) {
+      monthInfo = parseMonthTitleFr(text(titleRow, c));
+    }
+    if (!monthInfo) {
+      errors.push(`Bloc mensuel non identifié à la ligne ${headerRow} (titre attendu à la ligne ${titleRow}).`);
+      continue;
+    }
+
+    const dataEnd = b + 1 < headerRows.length ? headerRows[b + 1] - 2 : rowCount;
+    for (let r = headerRow + 1; r <= dataEnd; r++) {
+      const dateCellValue = sheet.getRow(r).getCell(4).value;
+      const dateRaw = text(r, 4);
+
+      // La colonne "Jour" (date) est généralement un texte court sans année ("1-janv."),
+      // mais certains blocs contiennent une vraie date Excel : dans ce cas on fait
+      // confiance au jour/mois de cette date (plus fiable qu'un texte), tout en gardant
+      // l'année du titre du bloc (fiable sur tout le fichier, contrairement à l'année
+      // parfois erronée encodée dans la date native — vu sur des fichiers réels).
+      let day: number | null;
+      let month: string;
+      if (dateCellValue instanceof Date) {
+        day = dateCellValue.getDate();
+        month = pad2(dateCellValue.getMonth() + 1);
+      } else {
+        day = extractDayOfMonth(dateRaw);
+        month = monthInfo.month;
+      }
+      if (!day) continue; // ligne vide ou hors tableau (ex. totaux/graphiques)
+
+      const entry_date = `${monthInfo.year}-${month}-${pad2(day)}`;
+      const work_mode = resolveWorkMode(text(r, 6));
+      const start_time = normalizeTimeString(text(r, 7));
+      const end_time = normalizeTimeString(text(r, 8));
+      const break_minutes = durationCellToMinutes(text(r, 9));
+      const tasksRaw = text(r, 10);
+      const remarksRaw = text(r, 11);
+
+      // Le "type de jour" (congé, férié, maladie, repos...) est saisi à la main, parfois
+      // dans la colonne Tâches, parfois dans Remarques : on cherche un mot-clé reconnu
+      // dans les deux avant de considérer le jour comme "normal" (travaillé).
+      const remarksDayType = remarksRaw ? resolveDayType(remarksRaw) : null;
+      const tasksDayType = tasksRaw ? resolveDayType(tasksRaw) : null;
+      const day_type: DayType = remarksDayType ?? tasksDayType ?? "normal";
+
+      const tasks = tasksDayType ? null : tasksRaw || null;
+      const remarks = remarksDayType ? null : remarksRaw || null;
+
+      const hours = computeDayHours(
+        { day_type, start_time, end_time, break_minutes, entry_date },
+        DEFAULT_WEEKDAY_HOURS
+      );
+
+      rows.push({
+        line: r,
+        email: "",
+        entry_date,
+        day_type,
+        start_time,
+        end_time,
+        break_minutes,
+        work_mode,
+        hours,
+        tasks,
+        remarks,
+      });
+    }
+  }
+
+  return {
+    rows,
+    errors,
+    detectedHeaders: ["Jour", "Jour", "Heures", "Travail", "Début", "Fin", "Pause", "Tâches effectuées", "Remarques"],
+    sampleRows: [],
+    needsDefaultEmployee: true,
+    detectedEmployeeName,
+  };
+}
+
 function cellToText(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) {
-    return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}T${pad2(value.getHours())}:${pad2(value.getMinutes())}:${pad2(value.getSeconds())}`;
+    // Les cellules "heure seule" d'Excel (ex. Début/Fin/Pause) sont ancrées sur la date
+    // pivot 1899-12-30 et stockées en UTC sans aucune signification de fuseau horaire.
+    // Les lire avec les getters locaux introduit un décalage parasite de quelques minutes
+    // pour ces dates antérieures à 1900 (règle d'heure locale moyenne historique appliquée
+    // par certains fuseaux, ex. +9 min) : on utilise donc les composants UTC pour ce cas
+    // précis, et les composants locaux pour les vraies dates calendaires (comportement
+    // inchangé, cf. commentaire de parseHoursXlsx).
+    const isExcelTimeAnchor = value.getUTCFullYear() === 1899;
+    const y = isExcelTimeAnchor ? value.getUTCFullYear() : value.getFullYear();
+    const mo = isExcelTimeAnchor ? value.getUTCMonth() : value.getMonth();
+    const d = isExcelTimeAnchor ? value.getUTCDate() : value.getDate();
+    const h = isExcelTimeAnchor ? value.getUTCHours() : value.getHours();
+    const mi = isExcelTimeAnchor ? value.getUTCMinutes() : value.getMinutes();
+    const s = isExcelTimeAnchor ? value.getUTCSeconds() : value.getSeconds();
+    return `${y}-${pad2(mo + 1)}-${pad2(d)}T${pad2(h)}:${pad2(mi)}:${pad2(s)}`;
   }
   if (typeof value === "object") {
     if ("text" in value && typeof value.text === "string") return value.text;

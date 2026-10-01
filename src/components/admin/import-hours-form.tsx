@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { analyzeImportAction, confirmImportAction, ImportPreviewRow, AnalyzeImportResult } from "@/lib/actions/import";
+import { cn } from "@/lib/utils";
 
 const CSV_HEADER = "email,date,type_jour,heure_debut,heure_fin,pause_minutes,mode,taches,remarques";
 const CSV_EXAMPLE = `${CSV_HEADER}
@@ -48,6 +49,7 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
   const [finalResult, setFinalResult] = React.useState<{ imported?: number; error?: string } | null>(null);
   const [confirming, setConfirming] = React.useState(false);
   const [defaultEmployee, setDefaultEmployee] = React.useState("");
+  const [assignEmployee, setAssignEmployee] = React.useState("");
 
   async function handleAnalyze(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -63,7 +65,31 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
       return;
     }
     setPreview(res);
-    setSelected(new Set(res.rows.map((r) => r.line)));
+    // Seules les lignes déjà associées à un employé sont présélectionnées : les lignes
+    // non assignées doivent d'abord être rattachées à un employé avant d'être importées.
+    setSelected(new Set(res.rows.filter((r) => r.profile_id).map((r) => r.line)));
+    if (res.suggestedEmployee && !defaultEmployee) setDefaultEmployee(res.suggestedEmployee.id);
+  }
+
+  /** Associe l'employé choisi à toutes les lignes non encore assignées de l'aperçu (fichier
+   * sans colonne email), sans avoir à ré-uploader/ré-analyser le fichier. */
+  function applyEmployeeToUnresolved() {
+    if (!preview || !assignEmployee) return;
+    const employee = employees.find((e) => e.id === assignEmployee);
+    if (!employee) return;
+
+    const newlyAssignedLines: number[] = [];
+    const rows = preview.rows.map((r) => {
+      if (r.profile_id) return r;
+      newlyAssignedLines.push(r.line);
+      return { ...r, profile_id: employee.id, full_name: employee.full_name, email: employee.email };
+    });
+    setPreview({ ...preview, rows });
+    setSelected((prev) => {
+      const next = new Set(prev);
+      newlyAssignedLines.forEach((line) => next.add(line));
+      return next;
+    });
   }
 
   const filteredRows = React.useMemo(() => {
@@ -89,6 +115,7 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
     setSelected((prev) => {
       const next = new Set(prev);
       for (const r of filteredRows) {
+        if (!r.profile_id) continue; // lignes non assignées : pas sélectionnables
         if (checked) next.add(r.line);
         else next.delete(r.line);
       }
@@ -116,7 +143,9 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
     setSelected(new Set());
   }
 
-  const allFilteredSelected = filteredRows.length > 0 && filteredRows.every((r) => selected.has(r.line));
+  const resolvableFilteredRows = filteredRows.filter((r) => r.profile_id);
+  const allFilteredSelected = resolvableFilteredRows.length > 0 && resolvableFilteredRows.every((r) => selected.has(r.line));
+  const unresolvedCount = preview?.rows.filter((r) => !r.profile_id).length ?? 0;
 
   return (
     <div className="space-y-4">
@@ -183,12 +212,35 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
             </div>
           </div>
 
-          {preview.needsDefaultEmployee && !defaultEmployee && (
-            <p className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-              Aucune colonne email détectée dans ce fichier. Sélectionnez un employé par défaut ci-dessus puis
-              relancez l&apos;analyse pour associer les lignes à un compte.
+          {preview.suggestedEmployee && (
+            <p className="text-sm text-blue-700 bg-blue-50 rounded-md px-3 py-2 flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+              Employé détecté dans le fichier : <strong>{preview.suggestedEmployee.full_name}</strong> — présélectionné ci-dessus.
             </p>
+          )}
+
+          {unresolvedCount > 0 && (
+            <div className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2 space-y-2">
+              <p className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                Aucune colonne email détectée : {unresolvedCount} ligne(s) ne sont associées à aucun employé.
+                Choisissez un employé ci-dessous pour les assigner toutes, sans avoir à ré-analyser le fichier.
+              </p>
+              <div className="flex flex-wrap gap-2 items-end">
+                <div className="space-y-1 min-w-[220px]">
+                  <Label htmlFor="assign-employee">Employé à assigner</Label>
+                  <Select id="assign-employee" value={assignEmployee} onChange={(e) => setAssignEmployee(e.target.value)}>
+                    <option value="">— Choisir —</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.email})</option>
+                    ))}
+                  </Select>
+                </div>
+                <Button type="button" size="sm" onClick={applyEmployeeToUnresolved} disabled={!assignEmployee}>
+                  Assigner aux {unresolvedCount} ligne(s) non assignée(s)
+                </Button>
+              </div>
+            </div>
           )}
 
           {preview.sampleRows.length > 0 && (
@@ -212,7 +264,8 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-slate-900">
-              Aperçu — {preview.rows.length} ligne(s) valide(s)
+              Aperçu — {preview.rows.length} ligne(s) détectée(s)
+              {unresolvedCount > 0 && `, ${unresolvedCount} non assignée(s)`}
               {preview.errors.length > 0 && `, ${preview.errors.length} ignorée(s)`}
             </h2>
           </div>
@@ -277,13 +330,24 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
                   </thead>
                   <tbody>
                     {filteredRows.map((r) => (
-                      <tr key={r.line} className="border-t border-slate-100">
+                      <tr key={r.line} className={cn("border-t border-slate-100", !r.profile_id && "bg-amber-50/60")}>
                         <td className="px-2 py-1.5">
-                          <input type="checkbox" checked={selected.has(r.line)} onChange={() => toggleRow(r.line)} />
+                          <input
+                            type="checkbox"
+                            checked={selected.has(r.line)}
+                            onChange={() => toggleRow(r.line)}
+                            disabled={!r.profile_id}
+                          />
                         </td>
                         <td className="px-2 py-1.5">
-                          <div className="font-medium text-slate-800">{r.full_name}</div>
-                          <div className="text-xs text-slate-400">{r.email}</div>
+                          {r.profile_id ? (
+                            <>
+                              <div className="font-medium text-slate-800">{r.full_name}</div>
+                              <div className="text-xs text-slate-400">{r.email}</div>
+                            </>
+                          ) : (
+                            <span className="text-xs text-amber-700 font-medium">Non assigné</span>
+                          )}
                         </td>
                         <td className="px-2 py-1.5">{r.entry_date}</td>
                         <td className="px-2 py-1.5">{DAY_TYPE_LABELS[r.day_type] ?? r.day_type}</td>

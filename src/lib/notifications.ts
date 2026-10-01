@@ -309,6 +309,31 @@ export async function notifyMeetingInvite(participants: Profile[], meeting: Meet
   );
 }
 
+/** Alerte les administrateurs qu'un document scanné vient d'être traité par OCR et
+ * attend une relecture : combien de lignes sont valides, combien nécessitent une correction. */
+export async function notifyAdminsOcrScan(summary: {
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  fileName: string;
+}): Promise<void> {
+  const admins = await listAdmins();
+  if (admins.length === 0) return;
+
+  const title =
+    summary.invalidRows > 0
+      ? `Scan à vérifier — ${summary.invalidRows} anomalie(s) détectée(s)`
+      : `Scan analysé — ${summary.validRows} ligne(s) prête(s) à importer`;
+  const body = `${summary.fileName} : ${summary.validRows} ligne(s) valide(s), ${summary.invalidRows} à corriger sur ${summary.totalRows} détectée(s).`;
+
+  await createNotifications(admins.map((a) => a.id), {
+    type: "ocr_scan",
+    title,
+    body,
+    link: "/admin/ocr-import",
+  });
+}
+
 /** Informe un destinataire (ou tous les employés actifs si diffusion) d'un nouveau message. */
 export async function notifyNewMessage(recipients: Profile[], senderName: string, body: string, isBroadcast: boolean): Promise<void> {
   if (recipients.length === 0) return;

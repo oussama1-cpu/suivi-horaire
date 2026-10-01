@@ -49,6 +49,7 @@ export type NotificationType =
   | "task"
   | "meeting"
   | "message"
+  | "ocr_scan"
   | "info";
 
 export interface AppNotification {
@@ -157,20 +158,34 @@ export interface Message {
   read: boolean;
 }
 
-export interface PersonalContact {
-  id: string;
-  owner_id: string;
-  full_name: string;
-  phone: string | null;
-  email: string | null;
-  note: string | null;
-  created_at: string;
-}
-
 export interface ConversationSummary {
   profile_id: string;
   full_name: string;
   last_message: string;
   last_at: string;
   unread: number;
+}
+
+// --- OCR (scan / photo de feuille de présence) --------------------------------
+
+export type OcrDraftStatus = "pending" | "confirmed" | "rejected";
+
+/** Une ligne extraite par OCR d'un document scanné, en attente de relecture par un admin
+ * avant d'être fusionnée avec les heures déjà enregistrées (voir queries.addHoursToTimeEntry). */
+export interface OcrDraftRow {
+  id: string;
+  batch_id: string;
+  document_id: string | null;
+  profile_id: string | null;
+  full_name: string | null;
+  entry_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  break_minutes: number;
+  hours: number;
+  raw_line: string;
+  valid: boolean;
+  issues: string[];
+  status: OcrDraftStatus;
+  created_at: string;
 }

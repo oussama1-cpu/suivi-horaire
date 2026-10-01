@@ -18,7 +18,7 @@ export default function LoginPage() {
 
       <div className="w-full max-w-sm relative z-10">
         <div className="flex flex-col items-center mb-8">
-          <Image src="/logo.png" alt="ELENI" width={220} height={71} className="object-contain mb-4" priority />
+          <Image src="/logo.png" alt="ELENI" width={220} height={76} className="object-contain mb-4" priority />
           <p className="text-sm text-slate-500 mt-1">Connectez-vous à votre espace</p>
         </div>
 

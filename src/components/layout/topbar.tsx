@@ -31,7 +31,7 @@ export function Topbar({
         <Image
           src="/logo.png"
           alt="ELENI"
-          width={100}
+          width={93}
           height={32}
           className="object-contain md:hidden"
         />

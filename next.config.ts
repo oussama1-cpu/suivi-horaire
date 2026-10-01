@@ -21,6 +21,8 @@ const nextConfig: NextConfig = {
         "localhost:3000",
         "127.0.0.1:3000",
         "192.168.178.129:3000",
+        "127.0.0.1:53311",
+        "localhost:53311",
         "suivi-horaire.vercel.app",
         "*.vercel.app",
       ],

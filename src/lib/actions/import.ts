@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/session";
 import { parseHoursCsv, parseHoursXlsx, CsvParseResult } from "@/lib/csv-import";
-import { findProfileByEmail, findProfileById, bulkImportTimeEntries, HistoricalHourRow } from "@/lib/queries";
+import { findProfileByEmail, findProfileById, listEmployees, bulkImportTimeEntries, HistoricalHourRow } from "@/lib/queries";
 import { DayType, WorkMode } from "@/lib/types";
 
 const MAX_SIZE = 5 * 1024 * 1024;
@@ -13,8 +13,10 @@ export interface ImportSummary {
   errors: string[];
 }
 
-/** Ligne prête à être importée, déjà résolue (profil trouvé) et affichée à l'admin
- * pour relecture/filtrage avant confirmation. */
+/** Ligne affichée à l'admin pour relecture/filtrage avant confirmation. `profile_id` est
+ * vide tant que la ligne n'a pas encore été associée à un employé (fichier sans colonne
+ * email et sans employé par défaut) : elle reste visible pour être assignée manuellement
+ * dans l'aperçu, plutôt que d'être rejetée d'emblée. */
 export interface ImportPreviewRow {
   line: number;
   profile_id: string;
@@ -57,6 +59,9 @@ export interface AnalyzeImportResult {
   detectedHeaders: string[];
   sampleRows: string[][];
   needsDefaultEmployee: boolean;
+  /** Employé suggéré par défaut si son nom a été repéré dans le fichier (ex. modèle
+   * "Suivi horaire" avec "Nom d'employé : ..."), pour pré-remplir le sélecteur côté UI. */
+  suggestedEmployee: { id: string; full_name: string; email: string } | null;
 }
 
 /** Étape 1 : analyse le fichier et renvoie un aperçu filtrable, sans rien écrire en base.
@@ -72,12 +77,27 @@ export async function analyzeImportAction(
 
   const parsed = file ? await parseFile(file) : { error: "Veuillez sélectionner un fichier CSV ou Excel." };
   if ("error" in parsed) return parsed;
-  const { rows, errors, detectedHeaders, sampleRows, needsDefaultEmployee } = parsed;
+  const { rows, errors, detectedHeaders, sampleRows, needsDefaultEmployee, detectedEmployeeName } = parsed;
 
   let defaultProfile: { id: string; full_name: string } | null = null;
   if (defaultProfileId) {
     const found = await findProfileById(defaultProfileId);
     defaultProfile = found ? { id: found.id, full_name: found.full_name } : null;
+  }
+
+  // Si le fichier indique un nom d'employé (ex. modèle "Suivi horaire") et qu'aucun employé
+  // par défaut n'a été choisi explicitement, on suggère la correspondance la plus proche.
+  let suggestedEmployee: { id: string; full_name: string; email: string } | null = null;
+  if (!defaultProfile && detectedEmployeeName) {
+    const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const target = normalize(detectedEmployeeName);
+    const employees = await listEmployees();
+    const match = employees.find((e) => normalize(e.full_name) === target) ??
+      employees.find((e) => normalize(e.full_name).includes(target) || target.includes(normalize(e.full_name)));
+    if (match) {
+      suggestedEmployee = { id: match.id, full_name: match.full_name, email: match.email };
+      defaultProfile = match;
+    }
   }
 
   // Résout l'email de chaque ligne vers un profil existant (ou retombe sur l'employé
@@ -107,19 +127,19 @@ export async function analyzeImportAction(
       profile = null;
     }
 
-    if (!profile) {
-      allErrors.push(
-        row.email
-          ? `Ligne ${row.line} : aucun compte trouvé pour "${row.email}".`
-          : `Ligne ${row.line} : aucun email dans le fichier et aucun employé par défaut sélectionné.`
-      );
+    // Une ligne avec un email présent mais introuvable est une vraie erreur (compte
+    // inexistant) : elle est rejetée. En revanche, l'absence d'email (fichier mensuel
+    // sans colonne email et sans employé par défaut choisi) n'est plus bloquante : la
+    // ligne reste dans l'aperçu, non assignée, pour être associée manuellement ensuite.
+    if (row.email && !profile) {
+      allErrors.push(`Ligne ${row.line} : aucun compte trouvé pour "${row.email}".`);
       continue;
     }
     preview.push({
       line: row.line,
-      profile_id: profile.id,
-      email,
-      full_name: profile.full_name,
+      profile_id: profile?.id ?? "",
+      email: profile ? email : "",
+      full_name: profile?.full_name ?? "",
       entry_date: row.entry_date,
       day_type: row.day_type,
       start_time: row.start_time,
@@ -132,7 +152,7 @@ export async function analyzeImportAction(
     });
   }
 
-  return { success: true, rows: preview, errors: allErrors, detectedHeaders, sampleRows, needsDefaultEmployee };
+  return { success: true, rows: preview, errors: allErrors, detectedHeaders, sampleRows, needsDefaultEmployee, suggestedEmployee };
 }
 
 /** Étape 2 : écrit en base les lignes sélectionnées par l'admin après relecture.
@@ -147,7 +167,12 @@ export async function confirmImportAction(
     return { error: "Aucune ligne sélectionnée à importer." };
   }
 
-  const toImport: HistoricalHourRow[] = rows.map((row) => ({
+  const resolvedRows = rows.filter((row) => row.profile_id);
+  if (resolvedRows.length === 0) {
+    return { error: "Aucune ligne sélectionnée n'est associée à un employé : assignez un employé avant de confirmer." };
+  }
+
+  const toImport: HistoricalHourRow[] = resolvedRows.map((row) => ({
     profile_id: row.profile_id,
     entry_date: row.entry_date,
     day_type: row.day_type,
