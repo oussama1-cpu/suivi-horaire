@@ -77,7 +77,8 @@ function normalizeKey(s: string): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-/** Convertit une date écrite sous divers formats courants (ISO, JJ/MM/AAAA, JJ-MM-AAAA...) en YYYY-MM-DD. */
+/** Convertit une date écrite sous divers formats courants (ISO, JJ/MM/AAAA, JJ-MM-AAAA...)
+ * ou un numéro de série Excel (ex. 45231, 45231.75) en YYYY-MM-DD. */
 export function normalizeDateString(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;
@@ -85,6 +86,17 @@ export function normalizeDateString(raw: string): string | null {
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  // Numéro de série Excel (date ou date+heure) → on garde la partie entière (date).
+  m = s.match(/^(\d{4,5})(?:\.\d+)?$/);
+  if (m) {
+    const serial = Math.floor(Number(m[1]));
+    // Plage raisonnable : 1900-01-05 (≈5) à ~2199-12-31 (≈80000).
+    if (serial >= 1 && serial <= 80000) {
+      const epochMs = (serial - 25569) * 86400 * 1000;
+      const d = new Date(epochMs);
+      return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+    }
+  }
   return null;
 }
 
