@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/session";
 import { parseHoursCsv, parseHoursXlsx, CsvParseResult } from "@/lib/csv-import";
-import { findProfileByEmail, findProfileById, listEmployees, bulkImportTimeEntries, HistoricalHourRow } from "@/lib/queries";
+import { findProfileByEmail, findProfileById, listEmployees, bulkImportTimeEntries, getEntryByDate, HistoricalHourRow } from "@/lib/queries";
 import { DayType, WorkMode } from "@/lib/types";
 
 const MAX_SIZE = 5 * 1024 * 1024;
@@ -28,7 +28,12 @@ export interface ImportPreviewRow {
   end_time: string | null;
   break_minutes: number;
   work_mode: WorkMode;
+  /** Heures calculées pour cette ligne seule. */
   hours: number;
+  /** Heures déjà enregistrées pour le même employé et la même date. */
+  existing_hours: number;
+  /** Total après ajout (existing_hours + hours). */
+  total_hours: number;
   tasks: string | null;
   remarks: string | null;
 }
@@ -135,6 +140,11 @@ export async function analyzeImportAction(
       allErrors.push(`Ligne ${row.line} : aucun compte trouvé pour "${row.email}".`);
       continue;
     }
+
+    const existing = profile ? await getEntryByDate(profile.id, row.entry_date) : null;
+    const existing_hours = existing?.hours ?? 0;
+    const total_hours = existing_hours + row.hours;
+
     preview.push({
       line: row.line,
       profile_id: profile?.id ?? "",
@@ -147,6 +157,8 @@ export async function analyzeImportAction(
       break_minutes: row.break_minutes,
       work_mode: row.work_mode,
       hours: row.hours,
+      existing_hours,
+      total_hours,
       tasks: row.tasks,
       remarks: row.remarks,
     });

@@ -1440,17 +1440,21 @@ export interface HistoricalHourRow {
   remarks: string | null;
 }
 
-/** Insère/remplace en masse des entrées de temps historiques (import CSV). */
+/** Insère en masse des entrées de temps historiques (import CSV) en ADDITIONNANT
+ * les heures à l'entrée existante du même jour. Les autres champs (type de jour,
+ * début/fin, pause, tâches, remarques) sont mis à jour avec la nouvelle ligne. */
 export async function bulkImportTimeEntries(rows: HistoricalHourRow[]): Promise<number> {
   let count = 0;
   for (const r of rows) {
+    const existing = await readTimeEntry(r.profile_id, r.entry_date);
+    const mergedHours = (existing?.hours ?? 0) + r.hours;
     await writeTimeEntry(r.profile_id, r.entry_date, {
       day_type: r.day_type,
       work_mode: r.work_mode,
       start_time: r.start_time,
       end_time: r.end_time,
       break_minutes: r.break_minutes,
-      hours: r.hours,
+      hours: mergedHours,
       tasks: r.tasks,
       remarks: r.remarks,
     });

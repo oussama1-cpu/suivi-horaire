@@ -82,7 +82,14 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
     const rows = preview.rows.map((r) => {
       if (r.profile_id) return r;
       newlyAssignedLines.push(r.line);
-      return { ...r, profile_id: employee.id, full_name: employee.full_name, email: employee.email };
+      return {
+        ...r,
+        profile_id: employee.id,
+        full_name: employee.full_name,
+        email: employee.email,
+        existing_hours: 0,
+        total_hours: r.hours,
+      };
     });
     setPreview({ ...preview, rows });
     setSelected((prev) => {
@@ -163,8 +170,8 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
           <li><code>heure_debut</code> / <code>heure_fin</code> : HH:MM, 8h30, etc. — optionnel selon le type de jour.</li>
         </ul>
         <p className="text-xs text-slate-500">
-          L&apos;import fusionne avec les données déjà existantes : seules les dates présentes dans le fichier sont
-          mises à jour, le reste de l&apos;historique de chaque employé n&apos;est pas modifié.
+          Les heures importées s&apos;ajoutent automatiquement aux heures déjà enregistrées pour la même date. Vous
+          pouvez choisir ligne par ligne celles à importer dans l&apos;aperçu ci-dessous.
         </p>
         <Button type="button" variant="outline" size="sm" onClick={downloadTemplate}>
           <Download className="h-3.5 w-3.5" /> Télécharger le modèle CSV
@@ -325,7 +332,9 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
                       <th className="px-2 py-2 text-left">Début</th>
                       <th className="px-2 py-2 text-left">Fin</th>
                       <th className="px-2 py-2 text-left">Pause</th>
-                      <th className="px-2 py-2 text-left">Heures</th>
+                      <th className="px-2 py-2 text-left">Import</th>
+                      <th className="px-2 py-2 text-left">Actuel</th>
+                      <th className="px-2 py-2 text-left">Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -355,11 +364,15 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
                         <td className="px-2 py-1.5">{r.end_time ?? "—"}</td>
                         <td className="px-2 py-1.5">{r.break_minutes} min</td>
                         <td className="px-2 py-1.5">{r.hours.toFixed(2)} h</td>
+                        <td className="px-2 py-1.5">{r.existing_hours.toFixed(2)} h</td>
+                        <td className={cn("px-2 py-1.5 font-semibold", r.existing_hours > 0 && "text-emerald-600")}>
+                          {r.total_hours.toFixed(2)} h
+                        </td>
                       </tr>
                     ))}
                     {filteredRows.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-2 py-4 text-center text-slate-400">
+                        <td colSpan={10} className="px-2 py-4 text-center text-slate-400">
                           Aucune ligne ne correspond aux filtres.
                         </td>
                       </tr>
