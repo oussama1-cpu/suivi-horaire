@@ -26,24 +26,30 @@ export function Topbar({
     .join("");
 
   return (
-    <header className="sticky top-0 z-30 h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-4 md:px-6 print:hidden">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-2 border-b border-slate-200 bg-white/80 px-3 backdrop-blur-md sm:gap-3 sm:px-4 md:px-6 print:hidden">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <Image
           src="/logo.png"
           alt="ELENI"
           width={93}
           height={32}
-          className="object-contain md:hidden"
+          className="object-contain md:hidden shrink-0"
         />
-        <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#b0abaa] to-[#736d6c] text-white text-xs font-semibold flex items-center justify-center shadow-sm shadow-[#545454]/20 hidden sm:flex">
+        <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#b0abaa] to-[#736d6c] text-xs font-semibold text-white shadow-sm shadow-[#545454]/20 sm:flex">
           {initials || "?"}
         </div>
-        <div>
-          <p className="text-sm font-medium text-slate-900 leading-tight">{fullName}</p>
-          {functionTitle && <p className="text-xs text-slate-500">{functionTitle}</p>}
+        <div className="min-w-0">
+          <p className="max-w-[140px] truncate text-sm font-medium leading-tight text-slate-900 sm:max-w-[220px] md:max-w-none">
+            {fullName}
+          </p>
+          {functionTitle && (
+            <p className="max-w-[140px] truncate text-xs text-slate-500 sm:max-w-[220px] md:max-w-none">
+              {functionTitle}
+            </p>
+          )}
         </div>
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <NotificationBell notifications={notifications} unreadCount={unreadCount} />
         <form action={signOut}>
           <Button type="submit" variant="ghost" size="sm">

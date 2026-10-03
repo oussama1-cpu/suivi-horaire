@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { ComponentType } from "react";
+import { ComponentType, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -22,6 +22,8 @@ import {
   Inbox,
   CalendarClock as MeetingIcon,
   MessageSquare,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import { Role } from "@/lib/types";
 
@@ -115,18 +117,42 @@ const comptableGroups: NavGroup[] = [
 export function Sidebar({ role }: { role: Role }) {
   const pathname = usePathname();
   const groups = role === "admin" ? adminGroups : role === "comptable" ? comptableGroups : employeeGroups;
+  const [collapsed, setCollapsed] = useState(false);
+
+  function toggle() {
+    setCollapsed((prev) => !prev);
+  }
 
   return (
-    <aside className="hidden md:flex w-64 flex-col border-r border-slate-200 bg-white print:hidden">
-      <div className="flex items-center px-5 h-16 border-b border-slate-200">
-        <Image src="/logo.png" alt="ELENI" width={122} height={42} className="object-contain" priority />
+    <aside
+      className={cn(
+        "hidden md:flex flex-col shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 ease-in-out print:hidden",
+        collapsed ? "w-[76px]" : "w-64"
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center h-16 border-b border-slate-200 overflow-hidden",
+          collapsed ? "justify-center px-2" : "px-5"
+        )}
+      >
+        <Image
+          src="/logo.png"
+          alt="ELENI"
+          width={collapsed ? 32 : 122}
+          height={collapsed ? 32 : 42}
+          className="object-contain"
+          priority
+        />
       </div>
       <nav className="flex-1 px-3 py-5 space-y-6 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.title}>
-            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-              {group.title}
-            </p>
+            {!collapsed && (
+              <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                {group.title}
+              </p>
+            )}
             <div className="space-y-1">
               {group.links.map((link) => {
                 const active = pathname === link.href;
@@ -135,15 +161,27 @@ export function Sidebar({ role }: { role: Role }) {
                   <Link
                     key={link.href}
                     href={link.href}
+                    title={collapsed ? link.label : undefined}
                     className={cn(
-                      "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
+                      "group relative flex items-center gap-3 rounded-xl text-sm font-medium transition-all",
+                      collapsed ? "justify-center px-0 py-2.5" : "px-3 py-2.5",
                       active
                         ? "bg-gradient-to-r from-[#b0abaa] to-[#736d6c] text-white shadow-md shadow-[#545454]/20"
                         : "text-slate-600 hover:bg-slate-100"
                     )}
                   >
-                    <Icon className={cn("h-4 w-4", active ? "text-white" : "text-slate-400")} />
-                    {link.label}
+                    <Icon
+                      className={cn(
+                        "h-4 w-4 shrink-0",
+                        active ? "text-white" : "text-slate-400 group-hover:text-slate-600"
+                      )}
+                    />
+                    {!collapsed && <span className="truncate">{link.label}</span>}
+                    {collapsed && (
+                      <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                        {link.label}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -151,6 +189,21 @@ export function Sidebar({ role }: { role: Role }) {
           </div>
         ))}
       </nav>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={collapsed ? "Développer le menu" : "Réduire le menu"}
+        className="flex items-center gap-2 border-t border-slate-200 px-3 py-3 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+      >
+        {collapsed ? (
+          <ChevronsRight className="mx-auto h-4 w-4" />
+        ) : (
+          <>
+            <ChevronsLeft className="h-4 w-4" />
+            <span>Réduire</span>
+          </>
+        )}
+      </button>
     </aside>
   );
 }
