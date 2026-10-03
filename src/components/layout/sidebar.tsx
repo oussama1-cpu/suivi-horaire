@@ -114,6 +114,10 @@ const comptableGroups: NavGroup[] = [
   },
 ];
 
+function isActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function Sidebar({ role }: { role: Role }) {
   const pathname = usePathname();
   const groups = role === "admin" ? adminGroups : role === "comptable" ? comptableGroups : employeeGroups;
@@ -126,7 +130,7 @@ export function Sidebar({ role }: { role: Role }) {
   return (
     <aside
       className={cn(
-        "hidden md:flex flex-col shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 ease-in-out print:hidden",
+        "hidden md:flex flex-col shrink-0 border-r border-slate-200 bg-white shadow-[4px_0_24px_-8px_rgba(0,0,0,0.06)] transition-[width] duration-200 ease-in-out print:hidden",
         collapsed ? "w-[76px]" : "w-64"
       )}
     >
@@ -155,19 +159,20 @@ export function Sidebar({ role }: { role: Role }) {
             )}
             <div className="space-y-1">
               {group.links.map((link) => {
-                const active = pathname === link.href;
+                const active = isActive(pathname, link.href);
                 const Icon = link.icon;
                 return (
                   <Link
                     key={link.href}
                     href={link.href}
+                    aria-current={active ? "page" : undefined}
                     title={collapsed ? link.label : undefined}
                     className={cn(
                       "group relative flex items-center gap-3 rounded-xl text-sm font-medium transition-all",
                       collapsed ? "justify-center px-0 py-2.5" : "px-3 py-2.5",
                       active
                         ? "bg-gradient-to-r from-[#b0abaa] to-[#736d6c] text-white shadow-md shadow-[#545454]/20"
-                        : "text-slate-600 hover:bg-slate-100"
+                        : "text-slate-600 hover:bg-slate-50"
                     )}
                   >
                     <Icon

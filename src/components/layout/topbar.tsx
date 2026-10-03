@@ -7,14 +7,22 @@ import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { AppNotification } from "@/lib/types";
 
+const ROLE_LABEL: Record<string, string> = {
+  employee: "Employé",
+  admin: "Admin",
+  comptable: "Comptable",
+};
+
 export function Topbar({
   fullName,
   functionTitle,
+  role,
   notifications,
   unreadCount,
 }: {
   fullName: string;
   functionTitle: string | null;
+  role: string;
   notifications: AppNotification[];
   unreadCount: number;
 }) {
@@ -39,14 +47,19 @@ export function Topbar({
           {initials || "?"}
         </div>
         <div className="min-w-0">
-          <p className="max-w-[140px] truncate text-sm font-medium leading-tight text-slate-900 sm:max-w-[220px] md:max-w-none">
+          <p className="max-w-[150px] truncate text-sm font-medium leading-tight text-slate-900 sm:max-w-[220px] md:max-w-none">
             {fullName}
           </p>
-          {functionTitle && (
-            <p className="max-w-[140px] truncate text-xs text-slate-500 sm:max-w-[220px] md:max-w-none">
-              {functionTitle}
-            </p>
-          )}
+          <div className="flex items-center gap-1.5">
+            {functionTitle && (
+              <p className="max-w-[120px] truncate text-xs text-slate-500 sm:max-w-[180px]">
+                {functionTitle}
+              </p>
+            )}
+            <span className="hidden sm:inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+              {ROLE_LABEL[role] ?? role}
+            </span>
+          </div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">

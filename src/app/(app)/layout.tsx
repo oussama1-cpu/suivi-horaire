@@ -4,6 +4,7 @@ import { listNotifications, countUnreadNotifications } from "@/lib/queries";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { Footer } from "@/components/layout/footer";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await getSessionProfile();
@@ -15,16 +16,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
 
   return (
-    <div className="flex min-h-screen w-full bg-gradient-to-b from-slate-50 to-slate-100/60">
+    <div className="flex min-h-screen w-full bg-gradient-to-br from-slate-50 to-slate-100/70">
       <Sidebar role={profile.role} />
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar
           fullName={profile.full_name}
           functionTitle={profile.function_title}
+          role={profile.role}
           notifications={notifications}
           unreadCount={unreadCount}
         />
-        <main className="flex-1 p-4 md:p-6 pb-24 md:pb-6 overflow-x-hidden">{children}</main>
+        <main className="flex-1 p-4 md:p-6 pb-28 md:pb-8 overflow-x-hidden">{children}</main>
+        <Footer />
       </div>
       <MobileNav role={profile.role} />
     </div>
