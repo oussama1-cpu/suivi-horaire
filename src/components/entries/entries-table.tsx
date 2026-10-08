@@ -61,6 +61,9 @@ export function EntriesTable({ profileId, monthDates, entriesByDate, readOnly }:
                       {entry?.start_time && entry.work_mode === "teletravail" && (
                         <Badge className="bg-teal-100 text-teal-700">Télétravail</Badge>
                       )}
+                      {entry?.imported && (
+                        <Badge className="bg-indigo-100 text-indigo-700">Import</Badge>
+                      )}
                       {entry && NON_WORKING_DAY_TYPES.includes(entry.day_type) && entry.start_time && entry.end_time && (
                         <Badge className="bg-green-100 text-green-700">Travaillé</Badge>
                       )}

@@ -85,6 +85,8 @@ export interface TimeEntry {
   hours: number;
   tasks: string | null;
   remarks: string | null;
+  /** true si la journée contient des heures ajoutées via un import de fichier. */
+  imported?: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -398,6 +398,7 @@ function mapTimeEntryData(data: FirebaseFirestore.DocumentData): TimeEntry {
     hours: Number(data.hours ?? 0),
     tasks: data.tasks ?? null,
     remarks: data.remarks ?? null,
+    imported: !!data.imported,
     created_at: data.created_at,
     updated_at: data.updated_at,
   };
@@ -428,6 +429,7 @@ async function writeTimeEntry(
     hours: 0,
     tasks: null as string | null,
     remarks: null as string | null,
+    imported: false,
   };
   const data = {
     ...base,
@@ -1457,6 +1459,7 @@ export async function bulkImportTimeEntries(rows: HistoricalHourRow[]): Promise<
       hours: mergedHours,
       tasks: r.tasks,
       remarks: r.remarks,
+      imported: true,
     });
     count++;
   }
