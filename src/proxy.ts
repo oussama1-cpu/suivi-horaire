@@ -4,11 +4,22 @@ import { getDb } from "@/lib/firebase";
 // Proxy (formerly "middleware") always runs on the Node.js runtime in
 // Next.js 16, so firebase-admin works fine here without extra config.
 
+// Cache en mémoire des validations de session (TTL court) : sinon chaque
+// requête authentifiée (page, navigation RSC, server action) fait une lecture
+// Firestore, ce qui épuise rapidement le quota quotidien gratuit.
+const SESSION_CACHE_TTL_MS = 60_000;
+const sessionCache = new Map<string, { valid: boolean; checkedAt: number }>();
+
 async function isSessionValid(token: string | undefined): Promise<boolean> {
   if (!token) return false;
+  const cached = sessionCache.get(token);
+  if (cached && Date.now() - cached.checkedAt < SESSION_CACHE_TTL_MS) return cached.valid;
   const snap = await getDb().collection("sessions").doc(token).get();
   const session = snap.data() as { expires: number } | undefined;
-  return !!session && session.expires > Date.now();
+  const valid = !!session && session.expires > Date.now();
+  if (sessionCache.size > 5000) sessionCache.clear();
+  sessionCache.set(token, { valid, checkedAt: Date.now() });
+  return valid;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +99,15 @@ export default async function proxy(request: NextRequest) {
     path.startsWith("/api") ||
     path.startsWith("/checkin");
   const token = request.cookies.get("session")?.value;
-  const authenticated = await isSessionValid(token);
+  // Si Firestore est indisponible/quota épuisé, on traite la session comme
+  // invalide (redirection /login) plutôt que de faire planter la requête —
+  // l'utilisateur voit la page de connexion au lieu d'un écran blanc.
+  let authenticated = false;
+  try {
+    authenticated = await isSessionValid(token);
+  } catch {
+    authenticated = false;
+  }
 
   if (!authenticated && !isPublic) {
     const url = request.nextUrl.clone();
