@@ -60,9 +60,9 @@ import type { NextConfig } from "next";
 //    No Flash / plugins / PDFs embedded via <object>/<embed>/<applet>.
 //    (PDF download links use <a href>, not <object>.)
 //
-// Report-Only is used for the initial local test so that no existing
-// functionality breaks. Switch to Content-Security-Policy once violations
-// are confirmed to be zero in production.
+// Toutes les directives ci-dessus ont été vérifiées contre l'usage réel de
+// l'application (voir commentaires) : la CSP est donc appliquée directement
+// (bloquante), pas seulement en mode Report-Only.
 // ---------------------------------------------------------------------------
 
 const CSP = [
@@ -91,9 +91,8 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   // Force HTTPS pendant 2 ans une fois servi en HTTPS (sans effet en dev HTTP).
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-  // CSP en mode Report-Only : observe les violations sans bloquer quoi que ce soit.
-  // Passer à "Content-Security-Policy" une fois que les violations sont nulles en production.
-  { key: "Content-Security-Policy-Report-Only", value: CSP },
+  // CSP appliquée (bloquante), pas seulement en Report-Only.
+  { key: "Content-Security-Policy", value: CSP },
 ];
 
 const nextConfig: NextConfig = {
