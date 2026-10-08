@@ -1466,6 +1466,26 @@ export async function bulkImportTimeEntries(rows: HistoricalHourRow[]): Promise<
   return count;
 }
 
+export interface ImportedEntryRow extends TimeEntry {
+  full_name: string;
+  email: string;
+}
+
+/** Toutes les entrées marquées comme issues d'un import de fichier, jointes au
+ * profil de l'employé, triées de la plus récente à la plus ancienne. */
+export async function listImportedEntries(limit = 500): Promise<ImportedEntryRow[]> {
+  const snap = await (await db()).collection("timeEntries").where("imported", "==", true).get();
+  const profiles = new Map((await listAllAccounts()).map((p) => [p.id, p]));
+  return snap.docs
+    .map((d) => {
+      const entry = mapTimeEntryData(d.data());
+      const p = profiles.get(entry.profile_id);
+      return { ...entry, full_name: p?.full_name ?? "(compte supprimé)", email: p?.email ?? "" };
+    })
+    .sort((a, b) => b.entry_date.localeCompare(a.entry_date))
+    .slice(0, limit);
+}
+
 // --- Import par scan OCR (feuille de présence papier) --------------------------
 
 function mapOcrDraftData(data: FirebaseFirestore.DocumentData): OcrDraftRow {
