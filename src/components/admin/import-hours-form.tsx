@@ -199,7 +199,7 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
             ))}
           </Select>
         </div>
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending} className="w-full sm:w-auto">
           <Upload className="h-3.5 w-3.5" />
           {pending ? "Analyse en cours..." : "Analyser le fichier"}
         </Button>
@@ -381,9 +381,9 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
                 </table>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <p className="text-sm text-slate-500">{selected.size} ligne(s) sélectionnée(s) sur {preview.rows.length}</p>
-                <Button type="button" onClick={handleConfirm} disabled={confirming || selected.size === 0}>
+                <Button type="button" onClick={handleConfirm} disabled={confirming || selected.size === 0} className="w-full sm:w-auto">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   {confirming ? "Import en cours..." : `Confirmer l'import (${selected.size})`}
                 </Button>

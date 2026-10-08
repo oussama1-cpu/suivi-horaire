@@ -5,7 +5,7 @@ function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-200/60 transition-shadow",
+        "rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-200/60 transition-shadow hover:shadow-md",
         className
       )}
       {...props}
@@ -14,7 +14,7 @@ function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
 }
 
 function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-1 p-5 pb-0", className)} {...props} />;
+  return <div className={cn("flex flex-col gap-1 p-4 md:p-5 pb-0", className)} {...props} />;
 }
 
 function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
@@ -28,7 +28,7 @@ function CardValue({ className, ...props }: React.HTMLAttributes<HTMLDivElement>
 }
 
 function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("p-5", className)} {...props} />;
+  return <div className={cn("p-4 md:p-5", className)} {...props} />;
 }
 
 export { Card, CardHeader, CardTitle, CardValue, CardContent };
