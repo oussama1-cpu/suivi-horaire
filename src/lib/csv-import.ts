@@ -56,6 +56,10 @@ const MODE_MAP: Record<string, WorkMode> = {
 };
 
 const EMAIL_ALIASES = ["email", "emailemploye", "adresseemail", "mail", "courriel", "emailsalarie"];
+const NAME_ALIASES = [
+  "nom", "name", "employe", "employee", "nomemploye", "nomdelemploye", "employename",
+  "salarie", "nomcomplet", "fullname", "agent", "collaborateur", "nomprenom", "prenomnom",
+];
 const DATE_ALIASES = ["date", "jour", "datejour", "journee", "datedujour"];
 const DAY_TYPE_ALIASES = [
   "typejour", "type", "statut", "statutjour", "typedejour", "categoriejour", "nature",
@@ -200,6 +204,9 @@ export interface ParsedHourRow {
   line: number;
   /** Vide si le fichier n'a pas de colonne email reconnue (l'appelant doit alors fournir un employé par défaut). */
   email: string;
+  /** Nom d'employé lu dans une colonne "nom"/"employé" du fichier, vide si absente.
+   * Permet de résoudre le compte par nom quand il n'y a pas d'email. */
+  employee_name: string;
   entry_date: string;
   day_type: DayType;
   start_time: string | null;
@@ -412,6 +419,7 @@ function parseSuiviHoraireTemplate(sheet: ExcelJS.Worksheet): CsvParseResult | n
       rows.push({
         line: r,
         email: "",
+        employee_name: detectedEmployeeName ?? "",
         entry_date,
         day_type,
         start_time,
@@ -479,6 +487,7 @@ function parseHoursTable(table: string[][]): CsvParseResult {
 
   const idx = {
     email: findCol(EMAIL_ALIASES),
+    name: findCol(NAME_ALIASES),
     date: findCol(DATE_ALIASES),
     dayType: findCol(DAY_TYPE_ALIASES),
     start: findCol(START_ALIASES),
@@ -501,16 +510,17 @@ function parseHoursTable(table: string[][]): CsvParseResult {
       ],
       detectedHeaders: rawHeader,
       sampleRows,
-      needsDefaultEmployee: idx.email === -1,
+      needsDefaultEmployee: idx.email === -1 && idx.name === -1,
     };
   }
 
-  const needsDefaultEmployee = idx.email === -1;
+  const needsDefaultEmployee = idx.email === -1 && idx.name === -1;
 
   for (let i = 1; i < table.length; i++) {
     const line = i + 1;
     const cells = table[i];
     const email = idx.email !== -1 ? (cells[idx.email] || "").trim().toLowerCase() : "";
+    const employee_name = idx.name !== -1 ? (cells[idx.name] || "").trim() : "";
     const dateRaw = (cells[idx.date] || "").trim();
     const entry_date = normalizeDateString(dateRaw);
     const dayTypeRaw = idx.dayType !== -1 ? (cells[idx.dayType] || "") : "";
@@ -543,6 +553,7 @@ function parseHoursTable(table: string[][]): CsvParseResult {
     rows.push({
       line,
       email,
+      employee_name,
       entry_date,
       day_type,
       start_time,

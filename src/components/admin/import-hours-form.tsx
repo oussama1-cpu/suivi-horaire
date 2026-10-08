@@ -164,7 +164,7 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
         </p>
         <ul className="text-xs text-slate-500 list-disc pl-5 space-y-0.5">
           <li>Les en-têtes sont reconnus même avec des variantes (accents, majuscules, synonymes FR/EN comme &quot;Arrivée&quot;/&quot;Départ&quot;).</li>
-          <li><code>email</code> : optionnel — si absent, sélectionnez un employé par défaut ci-dessous (fichier mensuel propre à une personne).</li>
+          <li><code>email</code> : optionnel — si absent, une colonne <code>nom</code>/<code>employé</code> est recherchée automatiquement et les lignes sont associées au compte correspondant ; sinon sélectionnez un employé par défaut ci-dessous.</li>
           <li><code>date</code> : détectée automatiquement même sans en-tête exact (formats YYYY-MM-DD ou JJ/MM/AAAA).</li>
           <li><code>type_jour</code> : normal, congé, maladie, férié payé, férié non payé ou repos (par défaut : normal).</li>
           <li><code>heure_debut</code> / <code>heure_fin</code> : HH:MM, 8h30, etc. — optionnel selon le type de jour.</li>
@@ -230,7 +230,7 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
             <div className="text-sm text-amber-700 bg-amber-50 rounded-md px-3 py-2 space-y-2">
               <p className="flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                Aucune colonne email détectée : {unresolvedCount} ligne(s) ne sont associées à aucun employé.
+                {unresolvedCount} ligne(s) ne sont associées à aucun compte (ni email ni nom reconnu dans le fichier).
                 Choisissez un employé ci-dessous pour les assigner toutes, sans avoir à ré-analyser le fichier.
               </p>
               <div className="flex flex-wrap gap-2 items-end">
@@ -326,7 +326,7 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
                           onChange={(e) => toggleAllFiltered(e.target.checked)}
                         />
                       </th>
-                      <th className="px-2 py-2 text-left">Employé</th>
+                      <th className="px-2 py-2 text-left">Compte</th>
                       <th className="px-2 py-2 text-left">Date</th>
                       <th className="px-2 py-2 text-left">Type</th>
                       <th className="px-2 py-2 text-left">Début</th>
@@ -353,9 +353,17 @@ export function ImportHoursForm({ employees }: { employees: EmployeeOption[] }) 
                             <>
                               <div className="font-medium text-slate-800">{r.full_name}</div>
                               <div className="text-xs text-slate-400">{r.email}</div>
+                              {r.source_name && r.source_name !== r.full_name && (
+                                <div className="text-xs text-slate-400">fichier : {r.source_name}</div>
+                              )}
                             </>
                           ) : (
-                            <span className="text-xs text-amber-700 font-medium">Non assigné</span>
+                            <>
+                              <span className="text-xs text-amber-700 font-medium">Non assigné</span>
+                              {r.source_name && (
+                                <div className="text-xs text-amber-600">fichier : {r.source_name}</div>
+                              )}
+                            </>
                           )}
                         </td>
                         <td className="px-2 py-1.5">{r.entry_date}</td>

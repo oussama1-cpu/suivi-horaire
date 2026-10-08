@@ -22,6 +22,8 @@ export interface ImportPreviewRow {
   profile_id: string;
   email: string;
   full_name: string;
+  /** Nom d'employé tel qu'écrit dans le fichier (colonne nom/employé), vide si absente. */
+  source_name: string;
   entry_date: string;
   day_type: DayType;
   start_time: string | null;
@@ -84,36 +86,53 @@ export async function analyzeImportAction(
   if ("error" in parsed) return parsed;
   const { rows, errors, detectedHeaders, sampleRows, needsDefaultEmployee, detectedEmployeeName } = parsed;
 
-  let defaultProfile: { id: string; full_name: string } | null = null;
+  let defaultProfile: { id: string; full_name: string; email: string } | null = null;
   if (defaultProfileId) {
     const found = await findProfileById(defaultProfileId);
-    defaultProfile = found ? { id: found.id, full_name: found.full_name } : null;
+    defaultProfile = found ? { id: found.id, full_name: found.full_name, email: found.email } : null;
   }
+
+  const employees = await listEmployees();
+  const normalizeName = (s: string) =>
+    s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, " ");
+
+  /** Associe un nom libre du fichier à un compte employé : égalité normalisée,
+   * puis correspondance par inclusion ("Fatma Zalila" ≈ "Zalila Fatma" partiel). */
+  const matchByName = (name: string) => {
+    const target = normalizeName(name);
+    if (!target) return null;
+    return (
+      employees.find((e) => normalizeName(e.full_name) === target) ??
+      employees.find(
+        (e) => normalizeName(e.full_name).includes(target) || target.includes(normalizeName(e.full_name))
+      ) ??
+      null
+    );
+  };
 
   // Si le fichier indique un nom d'employé (ex. modèle "Suivi horaire") et qu'aucun employé
   // par défaut n'a été choisi explicitement, on suggère la correspondance la plus proche.
   let suggestedEmployee: { id: string; full_name: string; email: string } | null = null;
   if (!defaultProfile && detectedEmployeeName) {
-    const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-    const target = normalize(detectedEmployeeName);
-    const employees = await listEmployees();
-    const match = employees.find((e) => normalize(e.full_name) === target) ??
-      employees.find((e) => normalize(e.full_name).includes(target) || target.includes(normalize(e.full_name)));
+    const match = matchByName(detectedEmployeeName);
     if (match) {
       suggestedEmployee = { id: match.id, full_name: match.full_name, email: match.email };
       defaultProfile = match;
     }
   }
 
-  // Résout l'email de chaque ligne vers un profil existant (ou retombe sur l'employé
-  // par défaut choisi si le fichier n'a pas de colonne email) ; les lignes dont
-  // l'employé est introuvable sont rejetées avec un message explicite.
+  // Résout chaque ligne vers un profil existant, par ordre de priorité :
+  // 1. email de la ligne, 2. nom d'employé de la ligne (colonne nom/employé),
+  // 3. employé par défaut choisi. Les lignes dont l'email est introuvable sont
+  // rejetées ; les lignes sans email ni correspondance de nom restent visibles,
+  // non assignées, pour association manuelle dans l'aperçu.
   const emailCache = new Map<string, { id: string; full_name: string } | null>();
+  const nameCache = new Map<string, { id: string; full_name: string; email: string } | null>();
   const preview: ImportPreviewRow[] = [];
   const allErrors = [...errors];
 
   for (const row of rows) {
-    let profile: { id: string; full_name: string } | null;
+    let profile: { id: string; full_name: string; email?: string } | null;
     let email = row.email;
 
     if (row.email) {
@@ -125,9 +144,19 @@ export async function analyzeImportAction(
         profile = found ? { id: found.id, full_name: found.full_name } : null;
         emailCache.set(row.email, profile);
       }
+    } else if (row.employee_name) {
+      const key = normalizeName(row.employee_name);
+      if (nameCache.has(key)) {
+        profile = nameCache.get(key) ?? null;
+      } else {
+        const match = matchByName(row.employee_name);
+        nameCache.set(key, match);
+        profile = match;
+      }
+      email = profile?.email ?? "";
     } else if (defaultProfile) {
       profile = defaultProfile;
-      email = defaultProfile.full_name;
+      email = defaultProfile.email;
     } else {
       profile = null;
     }
@@ -150,6 +179,7 @@ export async function analyzeImportAction(
       profile_id: profile?.id ?? "",
       email: profile ? email : "",
       full_name: profile?.full_name ?? "",
+      source_name: row.employee_name,
       entry_date: row.entry_date,
       day_type: row.day_type,
       start_time: row.start_time,
