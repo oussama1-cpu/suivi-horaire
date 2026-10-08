@@ -80,6 +80,9 @@ export default async function proxy(request: NextRequest) {
   const isPublic =
     path === "/login" ||
     path === "/forgot-password" ||
+    path === "/sw.js" ||
+    path === "/manifest.json" ||
+    path === "/robots.txt" ||
     path.startsWith("/reset-password") ||
     path.startsWith("/_next") ||
     path.startsWith("/api") ||
@@ -116,6 +119,6 @@ export default async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw\\.js|manifest\\.json|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest)$).*)",
   ],
 };
