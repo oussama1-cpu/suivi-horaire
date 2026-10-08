@@ -4,7 +4,7 @@ import { useActionState, use } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { resetPasswordAction } from "@/lib/actions/auth";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -26,10 +26,8 @@ export default function ResetPasswordPage({ params }: { params: Promise<{ token:
         {state?.success ? (
           <div className="space-y-4 bg-white/90 backdrop-blur-sm p-6 sm:p-7 rounded-2xl border border-slate-200 shadow-xl shadow-slate-200/60">
             <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">{state.message}</p>
-            <Link href="/login">
-              <Button type="button" size="lg" className="w-full">
-                Aller à la connexion
-              </Button>
+            <Link href="/login" className={buttonVariants({ size: "lg" }) + " w-full"}>
+              Aller à la connexion
             </Link>
           </div>
         ) : (

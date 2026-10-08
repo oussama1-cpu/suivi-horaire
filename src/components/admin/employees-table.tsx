@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Plus, ChevronRight, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { EmployeeDialog } from "@/components/admin/employee-dialog";
@@ -75,10 +75,12 @@ export function EmployeesTable({ employees }: { employees: EmployeeRow[] }) {
                   </Badge>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <Link href={`/admin/employees/${emp.id}`}>
-                    <Button variant="ghost" size="icon">
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
+                  <Link
+                    href={`/admin/employees/${emp.id}`}
+                    className={buttonVariants({ variant: "ghost", size: "icon" })}
+                    aria-label="Ouvrir la fiche"
+                  >
+                    <ChevronRight className="h-4 w-4" />
                   </Link>
                 </td>
               </tr>
