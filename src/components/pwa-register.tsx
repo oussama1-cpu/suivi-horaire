@@ -19,9 +19,22 @@ export function PwaRegister() {
       return;
     }
 
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      // Silently ignore - PWA install is a progressive enhancement, not required.
+    // Force the browser to check for a new sw.js on every load and reload
+    // the page once the new worker takes control, so users never stay stuck
+    // on a stale cached bundle (this previously broke all interactivity).
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloaded) return;
+      reloaded = true;
+      window.location.reload();
     });
+
+    navigator.serviceWorker
+      .register("/sw.js", { updateViaCache: "none" })
+      .then((reg) => reg.update())
+      .catch(() => {
+        // Silently ignore - PWA install is a progressive enhancement, not required.
+      });
   }, []);
 
   return null;

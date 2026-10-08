@@ -1,4 +1,4 @@
-const CACHE_NAME = "cmec-cache-v2";
+const CACHE_NAME = "cmec-cache-v3";
 const OFFLINE_URL = "/login";
 
 const PRECACHE_ASSETS = ["/logo.png", "/manifest.json"];
