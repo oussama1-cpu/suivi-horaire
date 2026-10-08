@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import { Geist, Geist_Mono } from "next/font/google";
 import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
@@ -40,7 +41,10 @@ export const viewport: Viewport = {
   themeColor: "#545454",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Nonces require every page to be dynamically rendered — see
+  // node_modules/next/dist/docs/01-app/02-guides/content-security-policy.md
+  await connection();
   return (
     <html
       lang="fr"
