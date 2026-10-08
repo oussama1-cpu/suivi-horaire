@@ -43,7 +43,7 @@ export function EmployeesTable({ employees }: { employees: EmployeeRow[] }) {
               className="pl-8 w-56"
             />
           </div>
-          <Button onClick={() => setOpen(true)}>
+          <Button type="button" onClick={() => setOpen(true)}>
             <Plus className="h-4 w-4" />
             Nouvel employé
           </Button>
