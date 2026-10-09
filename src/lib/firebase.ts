@@ -1,6 +1,6 @@
 import "server-only";
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { initializeFirestore, type Firestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import crypto from "crypto";
 import { hashPassword } from "./db";
@@ -8,6 +8,7 @@ import { DEFAULT_WEEKDAY_HOURS, DEFAULT_WEEKLY_TARGET_HOURS } from "./constants"
 
 declare global {
   var __firebaseApp: App | undefined;
+  var __firestoreDb: Firestore | undefined;
   var __firebaseSeedReady: Promise<void> | undefined;
 }
 
@@ -41,7 +42,13 @@ export function getFirebaseApp(): App {
 }
 
 export function getDb(): Firestore {
-  return getFirestore(getFirebaseApp());
+  if (!global.__firestoreDb) {
+    // preferRest : évite les connexions gRPC persistantes, qui saturent sur les
+    // fonctions serverless (RESOURCE_EXHAUSTED sur Vercel). Le transport HTTP/REST
+    // est stateless et n'a pas cette limite.
+    global.__firestoreDb = initializeFirestore(getFirebaseApp(), { preferRest: true });
+  }
+  return global.__firestoreDb;
 }
 
 export function getBucket() {
