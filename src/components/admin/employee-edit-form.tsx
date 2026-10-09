@@ -7,12 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { RefreshCw } from "lucide-react";
-import { updateEmployee, deleteEmployee, regenerateEmployeePin } from "@/lib/actions/employees";
+import { updateEmployee, deleteEmployee } from "@/lib/actions/employees";
 import { WEEKDAY_NAMES_FR } from "@/lib/constants";
 import { Profile, WeekdayHours } from "@/lib/types";
 
-export function EmployeeEditForm({ profile, pinCode }: { profile: Profile; pinCode: string | null }) {
+export function EmployeeEditForm({ profile }: { profile: Profile }) {
   const router = useRouter();
   const [fullName, setFullName] = React.useState(profile.full_name);
   const [functionTitle, setFunctionTitle] = React.useState(profile.function_title ?? "");
@@ -23,16 +22,6 @@ export function EmployeeEditForm({ profile, pinCode }: { profile: Profile; pinCo
   const [active, setActive] = React.useState(profile.active);
   const [saving, setSaving] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
-  const [pin, setPin] = React.useState(pinCode);
-  const [regenerating, setRegenerating] = React.useState(false);
-
-  async function handleRegeneratePin() {
-    if (!confirm("Régénérer le code PIN ? L'ancien code ne fonctionnera plus.")) return;
-    setRegenerating(true);
-    const result = await regenerateEmployeePin(profile.id);
-    setRegenerating(false);
-    if (result?.pin) setPin(result.pin);
-  }
 
   async function handleSave() {
     setSaving(true);
@@ -93,22 +82,6 @@ export function EmployeeEditForm({ profile, pinCode }: { profile: Profile; pinCo
         <div className="space-y-1.5">
           <Label>Téléphone (annuaire partagé)</Label>
           <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+216 ..." />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>Code PIN de pointage</Label>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-lg tracking-widest rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-slate-900">
-              {pin ?? "—"}
-            </span>
-            <Button type="button" variant="outline" size="sm" onClick={handleRegeneratePin} disabled={regenerating}>
-              <RefreshCw className="h-3.5 w-3.5" />
-              {regenerating ? "..." : "Régénérer"}
-            </Button>
-          </div>
-          <p className="text-xs text-slate-500">
-            Utilisé par l&apos;employé pour pointer au poste de pointage bureau (code PIN).
-          </p>
         </div>
 
         <div className="space-y-1.5">

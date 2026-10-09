@@ -12,7 +12,6 @@ import {
   updateMonthlySettings,
   MonthlySettingsInput,
   findProfileById,
-  regeneratePin,
 } from "@/lib/queries";
 import { notifySalaryUpdated } from "@/lib/notifications";
 import { WeekdayHours } from "@/lib/types";
@@ -99,13 +98,6 @@ export async function updateMonthlySettingsAction(profileId: string, input: Mont
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/leaves");
   return { success: true };
-}
-
-export async function regenerateEmployeePin(id: string) {
-  await requireAdmin();
-  const pin = await regeneratePin(id);
-  revalidatePath(`/admin/employees/${id}`);
-  return { success: true, pin };
 }
 
 export async function deleteEmployee(id: string) {

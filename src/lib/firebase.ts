@@ -83,8 +83,6 @@ async function seedIfEmpty(): Promise<void> {
     active: true,
     created_at: now,
     password_hash: hashPassword("admin123"),
-    qr_token: crypto.randomUUID(),
-    pin_code: null,
   });
   batch.set(db.collection("profiles").doc(employeeId), {
     id: employeeId,
@@ -103,8 +101,6 @@ async function seedIfEmpty(): Promise<void> {
     active: true,
     created_at: now,
     password_hash: hashPassword("employe123"),
-    qr_token: crypto.randomUUID(),
-    pin_code: "1234",
   });
   batch.set(db.collection("leaveBalances").doc(`${employeeId}__${year}__conge`), {
     id: crypto.randomUUID(),

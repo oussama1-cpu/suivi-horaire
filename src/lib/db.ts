@@ -10,8 +10,6 @@ import { Profile } from "./types";
 
 export interface StoredProfile extends Profile {
   password_hash: string;
-  qr_token: string;
-  pin_code: string | null;
 }
 
 export interface SessionRecord {

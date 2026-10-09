@@ -1,6 +1,5 @@
 import "server-only";
 import path from "path";
-import crypto from "crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { getDb, getBucket, withSeed } from "./firebase";
 import { generateId, hashPassword, StoredProfile, DocumentRecord } from "./db";
@@ -56,8 +55,6 @@ function mapProfileDoc(data: FirebaseFirestore.DocumentData): StoredProfile {
     active: !!data.active,
     created_at: data.created_at,
     password_hash: data.password_hash,
-    qr_token: data.qr_token,
-    pin_code: data.pin_code ?? null,
   };
 }
 
@@ -75,43 +72,6 @@ export async function findProfileByEmail(email: string): Promise<StoredProfile |
 export async function findProfileById(id: string): Promise<Profile | null> {
   const snap = await (await db()).collection("profiles").doc(id).get();
   return snap.exists ? stripPassword(mapProfileDoc(snap.data()!)) : null;
-}
-
-export async function findProfileByQrToken(token: string): Promise<Profile | null> {
-  const snap = await (await db()).collection("profiles").where("qr_token", "==", token).limit(1).get();
-  return snap.empty ? null : stripPassword(mapProfileDoc(snap.docs[0].data()));
-}
-
-export async function getQrToken(profileId: string): Promise<string | null> {
-  const snap = await (await db()).collection("profiles").doc(profileId).get();
-  return snap.exists ? snap.data()!.qr_token ?? null : null;
-}
-
-export async function findProfileByPin(pin: string): Promise<Profile | null> {
-  const snap = await (await db()).collection("profiles").where("pin_code", "==", pin).limit(1).get();
-  return snap.empty ? null : stripPassword(mapProfileDoc(snap.docs[0].data()));
-}
-
-export async function getPinCode(profileId: string): Promise<string | null> {
-  const snap = await (await db()).collection("profiles").doc(profileId).get();
-  return snap.exists ? snap.data()!.pin_code ?? null : null;
-}
-
-async function generateUniquePin(): Promise<string> {
-  const firestore = await db();
-  for (let i = 0; i < 20; i++) {
-    // crypto.randomInt (CSPRNG) plutôt que Math.random pour un code PIN non prédictible.
-    const pin = String(crypto.randomInt(1000, 10000));
-    const existing = await firestore.collection("profiles").where("pin_code", "==", pin).limit(1).get();
-    if (existing.empty) return pin;
-  }
-  throw new Error("Impossible de générer un code PIN unique.");
-}
-
-export async function regeneratePin(profileId: string): Promise<string> {
-  const pin = await generateUniquePin();
-  await (await db()).collection("profiles").doc(profileId).update({ pin_code: pin });
-  return pin;
 }
 
 export async function listEmployees(): Promise<Profile[]> {
@@ -149,7 +109,6 @@ export async function createEmployeeProfile(input: CreateProfileInput): Promise<
 
   const id = generateId();
   const now = new Date().toISOString();
-  const pin = await generateUniquePin();
 
   await (await db())
     .collection("profiles")
@@ -168,8 +127,6 @@ export async function createEmployeeProfile(input: CreateProfileInput): Promise<
       active: true,
       created_at: now,
       password_hash: hashPassword(input.password),
-      qr_token: generateId(),
-      pin_code: pin,
       monthly_salary: input.monthly_salary ?? 0,
       conge_days_per_month: input.conge_days_per_month ?? 1.5,
       maladie_days_per_month: input.maladie_days_per_month ?? 0.5,
@@ -235,8 +192,6 @@ export async function createComptableProfile(input: CreateComptableInput): Promi
       active: true,
       created_at: now,
       password_hash: hashPassword(input.password),
-      qr_token: generateId(),
-      pin_code: null,
       monthly_salary: 0,
       conge_days_per_month: 1.5,
       maladie_days_per_month: 0.5,

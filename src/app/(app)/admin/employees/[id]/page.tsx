@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Printer } from "lucide-react";
-import { findProfileById, getEntriesInRange, listDocumentsByProfile, getPinCode, listTasks } from "@/lib/queries";
+import { findProfileById, getEntriesInRange, listDocumentsByProfile, listTasks } from "@/lib/queries";
 import { TaskList } from "@/components/tasks/task-list";
 import { EmployeeEditForm } from "@/components/admin/employee-edit-form";
 import { MonthlySettingsEditor } from "@/components/admin/leave-balances-editor";
@@ -32,11 +32,10 @@ export default async function EmployeeDetailPage({
   const { start, end } = getMonthRange(year, month);
   const monthDates = getMonthDates(year, month);
 
-  const [p, monthEntries, paieDocsRaw, pinCode, monthTasks] = await Promise.all([
+  const [p, monthEntries, paieDocsRaw, monthTasks] = await Promise.all([
     findProfileById(id),
     getEntriesInRange(id, start, end),
     listDocumentsByProfile(id, "paie"),
-    getPinCode(id),
     listTasks(id, start, end),
   ]);
   if (!p) notFound();
@@ -74,7 +73,7 @@ export default async function EmployeeDetailPage({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <EmployeeEditForm profile={p} pinCode={pinCode} />
+        <EmployeeEditForm profile={p} />
         <MonthlySettingsEditor
           profileId={id}
           monthLabel={`${MONTH_NAMES_FR[month]} ${year}`}

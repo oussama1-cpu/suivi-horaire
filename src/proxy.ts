@@ -49,7 +49,7 @@ async function isSessionValid(token: string | undefined): Promise<boolean> {
 //    A nonce cannot be applied to element-level style= props.
 //
 //  img-src 'self' data:
-//    All images are self-hosted. data: is required for QR-code DataURLs.
+//    All images are self-hosted; data: kept for small inlined images.
 //
 //  font-src 'self' / connect-src 'self' / worker-src 'self' / manifest-src 'self'
 //    Everything (fonts, Server Actions, the PWA service worker, the web app
@@ -96,8 +96,7 @@ export default async function proxy(request: NextRequest) {
     path === "/robots.txt" ||
     path.startsWith("/reset-password") ||
     path.startsWith("/_next") ||
-    path.startsWith("/api") ||
-    path.startsWith("/checkin");
+    path.startsWith("/api");
   const token = request.cookies.get("session")?.value;
   // Si Firestore est indisponible/quota épuisé, on traite la session comme
   // invalide (redirection /login) plutôt que de faire planter la requête —
