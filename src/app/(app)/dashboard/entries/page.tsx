@@ -41,7 +41,7 @@ export default async function EntriesPage({
       </div>
 
       <p className="text-xs text-slate-500 -mt-3">
-        Les heures sont enregistrées automatiquement via le pointage (bouton ou QR code). Vous ne pouvez pas les
+        Les heures sont enregistrées automatiquement via le pointage. Vous ne pouvez pas les
         modifier manuellement — contactez votre administrateur en cas d&apos;erreur.
       </p>
 

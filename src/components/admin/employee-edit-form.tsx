@@ -107,7 +107,7 @@ export function EmployeeEditForm({ profile, pinCode }: { profile: Profile; pinCo
             </Button>
           </div>
           <p className="text-xs text-slate-500">
-            Utilisé par l&apos;employé pour pointer au poste de pointage bureau (QR partagé + code PIN).
+            Utilisé par l&apos;employé pour pointer au poste de pointage bureau (code PIN).
           </p>
         </div>
 

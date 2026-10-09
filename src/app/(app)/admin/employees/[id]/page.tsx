@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Printer, QrCode } from "lucide-react";
+import { ArrowLeft, Printer } from "lucide-react";
 import { findProfileById, getEntriesInRange, listDocumentsByProfile, getPinCode, listTasks } from "@/lib/queries";
 import { TaskList } from "@/components/tasks/task-list";
 import { EmployeeEditForm } from "@/components/admin/employee-edit-form";
@@ -65,13 +65,6 @@ export default async function EmployeeDetailPage({
           className="inline-flex items-center gap-1.5 text-sm text-[#545454] hover:text-[#3a3736]"
         >
           <Printer className="h-4 w-4" /> Imprimer le planning
-        </Link>
-        <Link
-          href={`/admin/employees/${id}/qrcode`}
-          target="_blank"
-          className="inline-flex items-center gap-1.5 text-sm text-[#545454] hover:text-[#3a3736]"
-        >
-          <QrCode className="h-4 w-4" /> Badge QR de pointage
         </Link>
       </div>
 

@@ -13,7 +13,6 @@ import {
   CalendarDays,
   FileBarChart,
   FileText,
-  QrCode,
   UploadCloud,
   ScanLine,
   Users,
@@ -48,7 +47,6 @@ const employeeGroups: NavGroup[] = [
       { href: "/dashboard/leaves", label: "Congés & Maladie", icon: PalmtreeIcon },
       { href: "/dashboard/calendar", label: "Calendrier", icon: CalendarDays },
       { href: "/dashboard/documents", label: "Documents", icon: FileText },
-      { href: "/dashboard/qrcode", label: "Mon QR Code", icon: QrCode },
     ],
   },
   {
@@ -90,10 +88,6 @@ const adminGroups: NavGroup[] = [
       { href: "/admin/meetings", label: "Réunions", icon: MeetingIcon },
       { href: "/messages", label: "Messages", icon: MessageSquare },
     ],
-  },
-  {
-    title: "Outils",
-    links: [{ href: "/admin/office-qr", label: "QR bureau", icon: QrCode }],
   },
 ];
 

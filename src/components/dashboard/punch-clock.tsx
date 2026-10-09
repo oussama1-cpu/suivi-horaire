@@ -1,10 +1,9 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { QrCode, Clock, CheckCircle2, LogIn, LogOut, Coffee, Play, Building2, Home, Info } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Clock, CheckCircle2, LogIn, LogOut, Coffee, Play, Building2, Home, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { TimeEntry, WorkMode } from "@/lib/types";
 import { DAY_TYPE_LABELS } from "@/lib/constants";
@@ -141,9 +140,6 @@ export function PunchClock({ todayEntry }: { todayEntry: TimeEntry | null }) {
                 <LogOut className="h-4 w-4" /> Pointer le départ
               </Button>
             )}
-            <Link href="/dashboard/qrcode" className={buttonVariants({ variant: "ghost" })}>
-              <QrCode className="h-4 w-4" /> Mon code
-            </Link>
           </div>
         )}
 
