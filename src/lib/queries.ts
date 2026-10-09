@@ -29,7 +29,12 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
-async function db() {
+async function sqlQ(strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> {
+  const s = await pgdb();
+  return s(strings, ...values) as Promise<Row[]>;
+}
+
+async function pgdb() {
   await withSeed();
   return sql();
 }
@@ -63,22 +68,22 @@ function mapProfileRow(r: Row): StoredProfile {
 // --- Profiles ---------------------------------------------------------------------
 
 export async function findProfileByEmail(email: string): Promise<StoredProfile | null> {
-  const rows = await (await db())`SELECT * FROM profiles WHERE lower(email) = lower(${email}) LIMIT 1`;
+  const rows = await sqlQ`SELECT * FROM profiles WHERE lower(email) = lower(${email}) LIMIT 1`;
   return rows.length ? mapProfileRow(rows[0]) : null;
 }
 
 export async function findProfileById(id: string): Promise<Profile | null> {
-  const rows = await (await db())`SELECT * FROM profiles WHERE id = ${id} LIMIT 1`;
+  const rows = await sqlQ`SELECT * FROM profiles WHERE id = ${id} LIMIT 1`;
   return rows.length ? stripPassword(mapProfileRow(rows[0])) : null;
 }
 
 export async function listEmployees(): Promise<Profile[]> {
-  const rows = await (await db())`SELECT * FROM profiles WHERE role = 'employee'`;
+  const rows = await sqlQ`SELECT * FROM profiles WHERE role = 'employee'`;
   return rows.map((r) => stripPassword(mapProfileRow(r))).sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
 export async function listAdmins(): Promise<Profile[]> {
-  const rows = await (await db())`SELECT * FROM profiles WHERE role = 'admin'`;
+  const rows = await sqlQ`SELECT * FROM profiles WHERE role = 'admin'`;
   return rows
     .map((r) => stripPassword(mapProfileRow(r)))
     .filter((p) => p.active)
@@ -106,7 +111,7 @@ export async function createEmployeeProfile(input: CreateProfileInput): Promise<
   const id = generateId();
   const now = new Date().toISOString();
 
-  await (await db())`INSERT INTO profiles
+  await sqlQ`INSERT INTO profiles
     (id, email, full_name, role, function_title, company, phone, weekly_target_hours, weekday_hours,
      active, created_at, password_hash, qr_token, pin_code, monthly_salary, conge_days_per_month, maladie_days_per_month)
     VALUES (${id}, ${input.email}, ${input.full_name}, 'employee', ${input.function_title || null}, ${input.company},
@@ -124,7 +129,7 @@ export interface MonthlySettingsInput {
 }
 
 export async function updateMonthlySettings(id: string, input: MonthlySettingsInput): Promise<void> {
-  await (await db())`UPDATE profiles SET monthly_salary = ${input.monthly_salary},
+  await sqlQ`UPDATE profiles SET monthly_salary = ${input.monthly_salary},
     conge_days_per_month = ${input.conge_days_per_month}, maladie_days_per_month = ${input.maladie_days_per_month}
     WHERE id = ${id}`;
 }
@@ -138,7 +143,7 @@ export interface CreateComptableInput {
 }
 
 export async function listComptables(): Promise<Profile[]> {
-  const rows = await (await db())`SELECT * FROM profiles WHERE role = 'comptable'`;
+  const rows = await sqlQ`SELECT * FROM profiles WHERE role = 'comptable'`;
   return rows.map((r) => stripPassword(mapProfileRow(r))).sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
@@ -150,7 +155,7 @@ export async function createComptableProfile(input: CreateComptableInput): Promi
   const id = generateId();
   const now = new Date().toISOString();
 
-  await (await db())`INSERT INTO profiles
+  await sqlQ`INSERT INTO profiles
     (id, email, full_name, role, function_title, company, phone, weekly_target_hours, weekday_hours,
      active, created_at, password_hash, qr_token, pin_code, monthly_salary, conge_days_per_month, maladie_days_per_month)
     VALUES (${id}, ${input.email}, ${input.full_name}, 'comptable', ${input.function_title || null}, ${input.company},
@@ -172,7 +177,7 @@ export interface UpdateProfileInput {
 }
 
 export async function updateProfile(input: UpdateProfileInput): Promise<{ error?: string }> {
-  await (await db())`UPDATE profiles SET full_name = ${input.full_name},
+  await sqlQ`UPDATE profiles SET full_name = ${input.full_name},
     function_title = ${input.function_title || null}, company = ${input.company},
     weekly_target_hours = ${input.weekly_target_hours}, weekday_hours = ${JSON.stringify(input.weekday_hours)},
     active = ${input.active}, phone = ${input.phone || null}
@@ -194,7 +199,7 @@ export async function updateAccount(id: string, input: UpdateAccountInput): Prom
     if (existing && existing.id !== id) return { error: "Un autre compte utilise déjà cet email." };
   }
   if (!input.email && !input.password && !input.role) return {};
-  const dbq = await db();
+  const dbq = await pgdb();
   await dbq.query(
     `UPDATE profiles SET
       email = COALESCE($1, email),
@@ -208,7 +213,7 @@ export async function updateAccount(id: string, input: UpdateAccountInput): Prom
 
 /** Supprime en cascade (best-effort) tout ce qui référence ce profil. */
 export async function deleteProfile(id: string): Promise<void> {
-  const dbq = await db();
+  const dbq = await pgdb();
 
   for (const table of ["sessions", "time_entries", "leave_balances", "employee_tasks", "leave_requests", "notifications"]) {
     await dbq.query(`DELETE FROM ${table} WHERE profile_id = $1`, [id]);
@@ -230,7 +235,7 @@ function leaveBalanceDocId(profileId: string, year: number, leaveType: string) {
 }
 
 export async function getLeaveBalances(profileId: string, year: number): Promise<LeaveBalance[]> {
-  const rows = await (await db())`SELECT * FROM leave_balances WHERE profile_id = ${profileId} AND year = ${year}`;
+  const rows = await sqlQ`SELECT * FROM leave_balances WHERE profile_id = ${profileId} AND year = ${year}`;
   return rows.map((r) => ({
     id: r.id,
     profile_id: r.profile_id,
@@ -248,7 +253,7 @@ export async function upsertLeaveBalance(
   total: number
 ): Promise<void> {
   const id = leaveBalanceDocId(profileId, year, leaveType);
-  await (await db())`INSERT INTO leave_balances (id, profile_id, year, leave_type, total, used)
+  await sqlQ`INSERT INTO leave_balances (id, profile_id, year, leave_type, total, used)
     VALUES (${id}, ${profileId}, ${year}, ${leaveType}, ${total}, 0)
     ON CONFLICT (id) DO UPDATE SET total = ${total}`;
 }
@@ -280,7 +285,7 @@ function mapTimeEntryRow(r: Row): TimeEntry {
 }
 
 async function readTimeEntry(profileId: string, date: string): Promise<TimeEntry | null> {
-  const rows = await (await db())`SELECT * FROM time_entries WHERE id = ${timeEntryDocId(profileId, date)}`;
+  const rows = await sqlQ`SELECT * FROM time_entries WHERE id = ${timeEntryDocId(profileId, date)}`;
   return rows.length ? mapTimeEntryRow(rows[0]) : null;
 }
 
@@ -290,7 +295,7 @@ async function writeTimeEntry(
   date: string,
   fields: Partial<Omit<TimeEntry, "id" | "profile_id" | "entry_date" | "created_at" | "updated_at">>
 ): Promise<TimeEntry> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const id = timeEntryDocId(profileId, date);
   const existingRows = await dbq`SELECT * FROM time_entries WHERE id = ${id}`;
   const existing = existingRows.length ? existingRows[0] : null;
@@ -326,14 +331,14 @@ async function writeTimeEntry(
 }
 
 export async function getEntriesInRange(profileId: string, start: string, end: string): Promise<TimeEntry[]> {
-  const rows = await (await db())`SELECT * FROM time_entries
+  const rows = await sqlQ`SELECT * FROM time_entries
     WHERE profile_id = ${profileId} AND entry_date >= ${start} AND entry_date <= ${end}
     ORDER BY entry_date`;
   return rows.map(mapTimeEntryRow);
 }
 
 export async function getAllEntriesInRange(start: string, end: string): Promise<TimeEntry[]> {
-  const rows = await (await db())`SELECT * FROM time_entries
+  const rows = await sqlQ`SELECT * FROM time_entries
     WHERE entry_date >= ${start} AND entry_date <= ${end}`;
   return rows.map(mapTimeEntryRow);
 }
@@ -352,7 +357,7 @@ export interface UpsertEntryInput {
 }
 
 export async function upsertEntry(input: UpsertEntryInput): Promise<{ error?: string; hours?: number }> {
-  const profiles = await (await db())`SELECT weekday_hours FROM profiles WHERE id = ${input.profile_id}`;
+  const profiles = await sqlQ`SELECT weekday_hours FROM profiles WHERE id = ${input.profile_id}`;
   if (profiles.length === 0) return { error: "Employé introuvable." };
   const weekdayHours = profiles[0].weekday_hours as WeekdayHours;
 
@@ -393,7 +398,7 @@ export interface BulkDayTypeUpdate {
  */
 export async function bulkSetDayType(updates: BulkDayTypeUpdate[], removableTypes: DayType[]): Promise<void> {
   if (updates.length === 0) return;
-  const dbq = await db();
+  const dbq = await pgdb();
 
   const profileIds = [...new Set(updates.map((u) => u.profile_id))];
   const weekdayHoursById = new Map<string, WeekdayHours>();
@@ -447,7 +452,7 @@ export async function bulkSetDayType(updates: BulkDayTypeUpdate[], removableType
 }
 
 export async function deleteEntry(id: string): Promise<void> {
-  await (await db())`DELETE FROM time_entries WHERE id = ${id}`;
+  await sqlQ`DELETE FROM time_entries WHERE id = ${id}`;
 }
 
 export async function getEntryByDate(profileId: string, date: string): Promise<TimeEntry | null> {
@@ -486,7 +491,7 @@ export async function createDocument(input: CreateDocumentInput): Promise<Docume
   const file_name = `${id}${ext}`;
   const now = new Date().toISOString();
 
-  await (await db())`INSERT INTO documents
+  await sqlQ`INSERT INTO documents
     (id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at, content)
     VALUES (${id}, ${input.profile_id}, ${file_name}, ${input.original_name}, ${input.mime_type},
       ${input.size}, ${input.note ? input.note.trim() : null}, ${input.category}, ${now}, ${input.buffer})`;
@@ -498,7 +503,7 @@ export async function listDocumentsByProfile(
   profileId: string,
   category?: DocumentRecord["category"]
 ): Promise<DocumentRecord[]> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const rows = category
     ? await dbq`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE profile_id = ${profileId} AND category = ${category} ORDER BY uploaded_at DESC`
     : await dbq`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE profile_id = ${profileId} ORDER BY uploaded_at DESC`;
@@ -513,28 +518,28 @@ export async function countDocumentsByProfiles(
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (profileIds.length === 0) return result;
-  const rows = await (await db())`SELECT profile_id, count(*)::int AS n FROM documents
+  const rows = await sqlQ`SELECT profile_id, count(*)::int AS n FROM documents
     WHERE category = ${category} AND profile_id = ANY(${profileIds}) GROUP BY profile_id`;
   for (const r of rows) result.set(r.profile_id, Number(r.n));
   return result;
 }
 
 export async function getDocumentById(id: string): Promise<DocumentRecord | null> {
-  const rows = await (await db())`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE id = ${id}`;
   return rows.length ? mapDocumentRow(rows[0]) : null;
 }
 
 export async function getDocumentContent(
   id: string
 ): Promise<{ content: Buffer; mime_type: string; original_name: string } | null> {
-  const rows = await (await db())`SELECT content, mime_type, original_name FROM documents WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT content, mime_type, original_name FROM documents WHERE id = ${id}`;
   if (rows.length === 0 || !rows[0].content) return null;
   const content = Buffer.isBuffer(rows[0].content) ? rows[0].content : Buffer.from(rows[0].content, "base64");
   return { content, mime_type: rows[0].mime_type, original_name: rows[0].original_name };
 }
 
 export async function deleteDocumentRecord(id: string): Promise<{ error?: string }> {
-  const rows = await (await db())`DELETE FROM documents WHERE id = ${id} RETURNING id`;
+  const rows = await sqlQ`DELETE FROM documents WHERE id = ${id} RETURNING id`;
   return rows.length ? {} : { error: "Document introuvable." };
 }
 
@@ -548,7 +553,7 @@ function todayStr(): string {
 }
 
 async function getWeekdayHours(profileId: string): Promise<WeekdayHours | null> {
-  const rows = await (await db())`SELECT weekday_hours FROM profiles WHERE id = ${profileId}`;
+  const rows = await sqlQ`SELECT weekday_hours FROM profiles WHERE id = ${profileId}`;
   return rows.length ? (rows[0].weekday_hours as WeekdayHours) ?? null : null;
 }
 
@@ -680,13 +685,13 @@ function sortTasks(tasks: EmployeeTask[]): EmployeeTask[] {
 }
 
 export async function listTasks(profileId: string, start: string, end: string): Promise<EmployeeTask[]> {
-  const rows = await (await db())`SELECT * FROM employee_tasks
+  const rows = await sqlQ`SELECT * FROM employee_tasks
     WHERE profile_id = ${profileId} AND task_date >= ${start} AND task_date <= ${end}`;
   return sortTasks(rows.map(mapTaskRow));
 }
 
 export async function listAllTasks(start: string, end: string): Promise<EmployeeTask[]> {
-  const rows = await (await db())`SELECT * FROM employee_tasks
+  const rows = await sqlQ`SELECT * FROM employee_tasks
     WHERE task_date >= ${start} AND task_date <= ${end}`;
   return sortTasks(rows.map(mapTaskRow));
 }
@@ -702,7 +707,7 @@ export interface CreateTaskInput {
 export async function createTask(input: CreateTaskInput): Promise<EmployeeTask> {
   const id = generateId();
   const now = new Date().toISOString();
-  await (await db())`INSERT INTO employee_tasks
+  await sqlQ`INSERT INTO employee_tasks
     (id, profile_id, task_date, title, description, is_innovation, done, created_at, updated_at)
     VALUES (${id}, ${input.profile_id}, ${input.task_date}, ${input.title.trim()},
       ${input.description.trim() || null}, ${input.is_innovation}, false, ${now}, ${now})`;
@@ -710,12 +715,12 @@ export async function createTask(input: CreateTaskInput): Promise<EmployeeTask> 
 }
 
 export async function setTaskDone(id: string, profileId: string, done: boolean): Promise<void> {
-  await (await db())`UPDATE employee_tasks SET done = ${done}, updated_at = ${new Date().toISOString()}
+  await sqlQ`UPDATE employee_tasks SET done = ${done}, updated_at = ${new Date().toISOString()}
     WHERE id = ${id} AND profile_id = ${profileId}`;
 }
 
 export async function deleteTask(id: string, profileId: string): Promise<void> {
-  await (await db())`DELETE FROM employee_tasks WHERE id = ${id} AND profile_id = ${profileId}`;
+  await sqlQ`DELETE FROM employee_tasks WHERE id = ${id} AND profile_id = ${profileId}`;
 }
 
 // --- Leave requests ---------------------------------------------------------------
@@ -736,12 +741,12 @@ function mapLeaveRequestRow(r: Row): LeaveRequest {
 }
 
 export async function listLeaveRequests(profileId: string): Promise<LeaveRequest[]> {
-  const rows = await (await db())`SELECT * FROM leave_requests WHERE profile_id = ${profileId} ORDER BY created_at DESC`;
+  const rows = await sqlQ`SELECT * FROM leave_requests WHERE profile_id = ${profileId} ORDER BY created_at DESC`;
   return rows.map(mapLeaveRequestRow);
 }
 
 export async function listAllLeaveRequests(status?: LeaveRequestStatus): Promise<LeaveRequest[]> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const rows = status
     ? await dbq`SELECT * FROM leave_requests WHERE status = ${status} ORDER BY created_at DESC`
     : await dbq`SELECT * FROM leave_requests ORDER BY created_at DESC`;
@@ -749,12 +754,12 @@ export async function listAllLeaveRequests(status?: LeaveRequestStatus): Promise
 }
 
 export async function countPendingLeaveRequests(): Promise<number> {
-  const rows = await (await db())`SELECT count(*)::int AS n FROM leave_requests WHERE status = 'pending'`;
+  const rows = await sqlQ`SELECT count(*)::int AS n FROM leave_requests WHERE status = 'pending'`;
   return Number(rows[0].n);
 }
 
 export async function getLeaveRequestById(id: string): Promise<LeaveRequest | null> {
-  const rows = await (await db())`SELECT * FROM leave_requests WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT * FROM leave_requests WHERE id = ${id}`;
   return rows.length ? mapLeaveRequestRow(rows[0]) : null;
 }
 
@@ -769,7 +774,7 @@ export interface CreateLeaveRequestInput {
 export async function createLeaveRequest(input: CreateLeaveRequestInput): Promise<LeaveRequest> {
   const id = generateId();
   const now = new Date().toISOString();
-  await (await db())`INSERT INTO leave_requests
+  await sqlQ`INSERT INTO leave_requests
     (id, profile_id, leave_type, start_date, end_date, comment, status, admin_comment, created_at, decided_at)
     VALUES (${id}, ${input.profile_id}, ${input.leave_type}, ${input.start_date}, ${input.end_date},
       ${input.comment.trim() || null}, 'pending', NULL, ${now}, NULL)`;
@@ -777,7 +782,7 @@ export async function createLeaveRequest(input: CreateLeaveRequestInput): Promis
 }
 
 export async function cancelLeaveRequest(id: string, profileId: string): Promise<{ error?: string }> {
-  const rows = await (await db())`DELETE FROM leave_requests
+  const rows = await sqlQ`DELETE FROM leave_requests
     WHERE id = ${id} AND profile_id = ${profileId} AND status = 'pending' RETURNING id`;
   if (rows.length === 0) return { error: "Seule une demande en attente peut être annulée." };
   return {};
@@ -788,7 +793,7 @@ export async function decideLeaveRequest(
   status: Exclude<LeaveRequestStatus, "pending">,
   adminComment: string
 ): Promise<{ error?: string; request?: LeaveRequest }> {
-  const rows = await (await db())`UPDATE leave_requests
+  const rows = await sqlQ`UPDATE leave_requests
     SET status = ${status}, admin_comment = ${adminComment.trim() || null}, decided_at = ${new Date().toISOString()}
     WHERE id = ${id} AND status = 'pending' RETURNING *`;
   if (rows.length === 0) return { error: "Demande introuvable ou déjà traitée." };
@@ -820,7 +825,7 @@ export interface NotificationInput {
 export async function createNotifications(profileIds: string[], input: NotificationInput): Promise<void> {
   const ids = [...new Set(profileIds)].filter(Boolean);
   if (ids.length === 0) return;
-  const dbq = await db();
+  const dbq = await pgdb();
   const now = new Date().toISOString();
   await dbq.query(
     `INSERT INTO notifications (id, profile_id, type, title, body, link, read, created_at)
@@ -830,18 +835,18 @@ export async function createNotifications(profileIds: string[], input: Notificat
 }
 
 export async function listNotifications(profileId: string, limit = 15): Promise<AppNotification[]> {
-  const rows = await (await db())`SELECT * FROM notifications WHERE profile_id = ${profileId}
+  const rows = await sqlQ`SELECT * FROM notifications WHERE profile_id = ${profileId}
     ORDER BY created_at DESC LIMIT ${limit}`;
   return rows.map(mapNotificationRow);
 }
 
 export async function countUnreadNotifications(profileId: string): Promise<number> {
-  const rows = await (await db())`SELECT count(*)::int AS n FROM notifications WHERE profile_id = ${profileId} AND read = false`;
+  const rows = await sqlQ`SELECT count(*)::int AS n FROM notifications WHERE profile_id = ${profileId} AND read = false`;
   return Number(rows[0].n);
 }
 
 export async function markNotificationsRead(profileId: string, ids?: string[]): Promise<void> {
-  const dbq = await db();
+  const dbq = await pgdb();
   if (ids && ids.length > 0) {
     await dbq`UPDATE notifications SET read = true WHERE profile_id = ${profileId} AND id = ANY(${ids})`;
   } else {
@@ -856,7 +861,7 @@ function sortByRoleThenName(a: Profile, b: Profile): number {
 }
 
 export async function listAllAccounts(): Promise<Profile[]> {
-  const rows = await (await db())`SELECT * FROM profiles`;
+  const rows = await sqlQ`SELECT * FROM profiles`;
   return rows.map((r) => stripPassword(mapProfileRow(r))).sort(sortByRoleThenName);
 }
 
@@ -916,7 +921,7 @@ export async function createMeeting(input: CreateMeetingInput): Promise<Meeting[
     }
   }
 
-  const dbq = await db();
+  const dbq = await pgdb();
   const now = new Date().toISOString();
   const created: Meeting[] = [];
   for (const occ of occurrences) {
@@ -950,7 +955,7 @@ export async function updateMeeting(
     participant_ids: string[];
   }
 ): Promise<{ error?: string }> {
-  const dbq = await db();
+  const dbq = await pgdb();
   await dbq`UPDATE meetings SET title = ${input.title.trim()}, description = ${input.description.trim() || null},
     location = ${input.location.trim() || null}, meeting_link = ${input.meeting_link.trim() || null},
     start_at = ${input.start_at}, end_at = ${input.end_at}, updated_at = ${new Date().toISOString()}
@@ -967,23 +972,23 @@ export async function updateMeeting(
 }
 
 export async function saveMeetingMinutes(id: string, minutes: string): Promise<void> {
-  await (await db())`UPDATE meetings SET minutes = ${minutes.trim() || null}, updated_at = ${new Date().toISOString()} WHERE id = ${id}`;
+  await sqlQ`UPDATE meetings SET minutes = ${minutes.trim() || null}, updated_at = ${new Date().toISOString()} WHERE id = ${id}`;
 }
 
 export async function deleteMeeting(id: string): Promise<void> {
-  const dbq = await db();
+  const dbq = await pgdb();
   await dbq`DELETE FROM meeting_attachments WHERE meeting_id = ${id}`;
   await dbq`DELETE FROM meeting_participants WHERE meeting_id = ${id}`;
   await dbq`DELETE FROM meetings WHERE id = ${id}`;
 }
 
 export async function getMeetingById(id: string): Promise<Meeting | null> {
-  const rows = await (await db())`SELECT * FROM meetings WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT * FROM meetings WHERE id = ${id}`;
   return rows.length ? mapMeetingRow(rows[0]) : null;
 }
 
 export async function listMeetingParticipants(meetingId: string): Promise<MeetingParticipant[]> {
-  const rows = await (await db())`SELECT mp.profile_id, p.full_name FROM meeting_participants mp
+  const rows = await sqlQ`SELECT mp.profile_id, p.full_name FROM meeting_participants mp
     JOIN profiles p ON p.id = mp.profile_id WHERE mp.meeting_id = ${meetingId} ORDER BY p.full_name`;
   return rows.map((r) => ({ meeting_id: meetingId, profile_id: r.profile_id, full_name: r.full_name }));
 }
@@ -991,7 +996,7 @@ export async function listMeetingParticipants(meetingId: string): Promise<Meetin
 /** Réunions à venir/passées visibles par un profil : celles qu'il a créées ou
  * auxquelles il est invité. Les admins voient toutes les réunions. */
 export async function listMeetingsFor(profile: Profile): Promise<Meeting[]> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const rows =
     profile.role === "admin"
       ? await dbq`SELECT * FROM meetings ORDER BY start_at DESC`
@@ -1024,34 +1029,34 @@ export interface CreateMeetingAttachmentInput {
 export async function createMeetingAttachment(input: CreateMeetingAttachmentInput): Promise<MeetingAttachment> {
   const id = generateId();
   const now = new Date().toISOString();
-  await (await db())`INSERT INTO meeting_attachments
+  await sqlQ`INSERT INTO meeting_attachments
     (id, meeting_id, original_name, mime_type, size, uploaded_at, content)
     VALUES (${id}, ${input.meeting_id}, ${input.original_name}, ${input.mime_type}, ${input.size}, ${now}, ${input.buffer})`;
   return mapMeetingAttachmentRow({ id, meeting_id: input.meeting_id, original_name: input.original_name, mime_type: input.mime_type, size: input.size, uploaded_at: now });
 }
 
 export async function listMeetingAttachments(meetingId: string): Promise<MeetingAttachment[]> {
-  const rows = await (await db())`SELECT id, meeting_id, original_name, mime_type, size, uploaded_at
+  const rows = await sqlQ`SELECT id, meeting_id, original_name, mime_type, size, uploaded_at
     FROM meeting_attachments WHERE meeting_id = ${meetingId} ORDER BY uploaded_at DESC`;
   return rows.map(mapMeetingAttachmentRow);
 }
 
 export async function getMeetingAttachmentById(id: string): Promise<(MeetingAttachment & { meeting_id: string }) | null> {
-  const rows = await (await db())`SELECT id, meeting_id, original_name, mime_type, size, uploaded_at FROM meeting_attachments WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT id, meeting_id, original_name, mime_type, size, uploaded_at FROM meeting_attachments WHERE id = ${id}`;
   return rows.length ? mapMeetingAttachmentRow(rows[0]) : null;
 }
 
 export async function getMeetingAttachmentContent(
   id: string
 ): Promise<{ content: Buffer; mime_type: string; original_name: string } | null> {
-  const rows = await (await db())`SELECT content, mime_type, original_name FROM meeting_attachments WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT content, mime_type, original_name FROM meeting_attachments WHERE id = ${id}`;
   if (rows.length === 0 || !rows[0].content) return null;
   const content = Buffer.isBuffer(rows[0].content) ? rows[0].content : Buffer.from(rows[0].content, "base64");
   return { content, mime_type: rows[0].mime_type, original_name: rows[0].original_name };
 }
 
 export async function deleteMeetingAttachment(id: string): Promise<void> {
-  await (await db())`DELETE FROM meeting_attachments WHERE id = ${id}`;
+  await sqlQ`DELETE FROM meeting_attachments WHERE id = ${id}`;
 }
 
 // --- Messagerie interne --------------------------------------------------------
@@ -1071,7 +1076,7 @@ function mapMessageRow(r: Row, viewerReadField: "recipient" | string): Message {
 }
 
 export async function sendMessage(input: { sender_id: string; recipient_id: string | null; body: string }): Promise<Message> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const senders = await dbq`SELECT full_name FROM profiles WHERE id = ${input.sender_id}`;
   const senderName = senders.length ? senders[0].full_name : "";
   const participantIds = input.recipient_id ? [input.sender_id, input.recipient_id] : [input.sender_id];
@@ -1086,13 +1091,13 @@ export async function sendMessage(input: { sender_id: string; recipient_id: stri
 
 /** Annonces diffusées à tous les employés (recipient_id IS NULL). */
 export async function listBroadcastMessages(viewerId: string, limit = 50): Promise<Message[]> {
-  const rows = await (await db())`SELECT * FROM messages WHERE is_broadcast = true ORDER BY created_at DESC LIMIT ${limit}`;
+  const rows = await sqlQ`SELECT * FROM messages WHERE is_broadcast = true ORDER BY created_at DESC LIMIT ${limit}`;
   return rows.map((r) => mapMessageRow(r, viewerId));
 }
 
 /** Conversation directe (dans les deux sens) entre deux comptes. */
 export async function listConversation(a: string, b: string, limit = 100): Promise<Message[]> {
-  const rows = await (await db())`SELECT * FROM messages
+  const rows = await sqlQ`SELECT * FROM messages
     WHERE is_broadcast = false AND ((sender_id = ${a} AND recipient_id = ${b}) OR (sender_id = ${b} AND recipient_id = ${a}))
     ORDER BY created_at LIMIT ${limit}`;
   return rows.map((r) => mapMessageRow(r, "recipient"));
@@ -1100,7 +1105,7 @@ export async function listConversation(a: string, b: string, limit = 100): Promi
 
 /** Liste des interlocuteurs avec qui l'utilisateur a échangé, triée par dernier message. */
 export async function listConversationsFor(profileId: string): Promise<ConversationSummary[]> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const rows = await dbq`SELECT * FROM messages
     WHERE is_broadcast = false AND ${profileId} = ANY(participant_ids)`;
 
@@ -1139,18 +1144,18 @@ export async function listConversationsFor(profileId: string): Promise<Conversat
 }
 
 export async function markConversationRead(viewerId: string, otherId: string): Promise<void> {
-  await (await db())`UPDATE messages SET read_by = array_append(read_by, ${viewerId})
+  await sqlQ`UPDATE messages SET read_by = array_append(read_by, ${viewerId})
     WHERE is_broadcast = false AND sender_id = ${otherId} AND recipient_id = ${viewerId}
       AND NOT (${viewerId} = ANY(read_by))`;
 }
 
 export async function markBroadcastRead(viewerId: string): Promise<void> {
-  await (await db())`UPDATE messages SET read_by = array_append(read_by, ${viewerId})
+  await sqlQ`UPDATE messages SET read_by = array_append(read_by, ${viewerId})
     WHERE is_broadcast = true AND NOT (${viewerId} = ANY(read_by))`;
 }
 
 export async function countUnreadMessages(profileId: string): Promise<number> {
-  const rows = await (await db())`SELECT count(*)::int AS n FROM messages
+  const rows = await sqlQ`SELECT count(*)::int AS n FROM messages
     WHERE NOT (${profileId} = ANY(read_by)) AND (
       (is_broadcast = false AND recipient_id = ${profileId}) OR
       (is_broadcast = true AND sender_id <> ${profileId})
@@ -1205,7 +1210,7 @@ export interface ImportedEntryRow extends TimeEntry {
 /** Toutes les entrées marquées comme issues d'un import de fichier, jointes au
  * profil de l'employé, triées de la plus récente à la plus ancienne. */
 export async function listImportedEntries(limit = 500): Promise<ImportedEntryRow[]> {
-  const rows = await (await db())`SELECT t.*, COALESCE(p.full_name, '(compte supprimé)') AS full_name, COALESCE(p.email, '') AS email
+  const rows = await sqlQ`SELECT t.*, COALESCE(p.full_name, '(compte supprimé)') AS full_name, COALESCE(p.email, '') AS email
     FROM time_entries t LEFT JOIN profiles p ON p.id = t.profile_id
     WHERE t.imported = true ORDER BY t.entry_date DESC LIMIT ${limit}`;
   return rows.map((r) => ({ ...mapTimeEntryRow(r), full_name: r.full_name, email: r.email }));
@@ -1252,7 +1257,7 @@ export interface CreateOcrDraftRowInput {
  * par un administrateur : rien n'est fusionné dans l'historique des heures à ce stade. */
 export async function createOcrDraftRows(rows: CreateOcrDraftRowInput[]): Promise<OcrDraftRow[]> {
   if (rows.length === 0) return [];
-  const dbq = await db();
+  const dbq = await pgdb();
   const now = new Date().toISOString();
   const created: OcrDraftRow[] = [];
 
@@ -1268,7 +1273,7 @@ export async function createOcrDraftRows(rows: CreateOcrDraftRowInput[]): Promis
 }
 
 export async function listOcrDrafts(status?: OcrDraftStatus): Promise<OcrDraftRow[]> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const rows = status
     ? await dbq`SELECT * FROM ocr_drafts WHERE status = ${status} ORDER BY created_at DESC`
     : await dbq`SELECT * FROM ocr_drafts ORDER BY created_at DESC`;
@@ -1276,7 +1281,7 @@ export async function listOcrDrafts(status?: OcrDraftStatus): Promise<OcrDraftRo
 }
 
 export async function getOcrDraftById(id: string): Promise<OcrDraftRow | null> {
-  const rows = await (await db())`SELECT * FROM ocr_drafts WHERE id = ${id}`;
+  const rows = await sqlQ`SELECT * FROM ocr_drafts WHERE id = ${id}`;
   return rows.length ? mapOcrDraftRow(rows[0]) : null;
 }
 
@@ -1294,7 +1299,7 @@ export interface UpdateOcrDraftInput {
 
 /** Permet à l'admin de corriger une ligne (employé, date, heures) avant de la confirmer. */
 export async function updateOcrDraft(id: string, fields: UpdateOcrDraftInput): Promise<void> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const setClauses: string[] = [];
   const params: unknown[] = [];
   let i = 1;
@@ -1310,7 +1315,7 @@ export async function updateOcrDraft(id: string, fields: UpdateOcrDraftInput): P
 
 export async function setOcrDraftStatus(ids: string[], status: OcrDraftStatus): Promise<void> {
   if (ids.length === 0) return;
-  await (await db())`UPDATE ocr_drafts SET status = ${status} WHERE id = ANY(${ids})`;
+  await sqlQ`UPDATE ocr_drafts SET status = ${status} WHERE id = ANY(${ids})`;
 }
 
 /**
@@ -1345,7 +1350,7 @@ const RESET_TOKEN_DURATION_MS = 60 * 60 * 1000; // 1 heure
 
 /** Crée un jeton de réinitialisation à usage unique et invalide les précédents. */
 export async function createPasswordReset(profileId: string): Promise<string> {
-  const dbq = await db();
+  const dbq = await pgdb();
   await dbq`DELETE FROM password_resets WHERE profile_id = ${profileId} AND used = false`;
   const token = generateId();
   await dbq`INSERT INTO password_resets (token, profile_id, expires, used, created_at)
@@ -1354,7 +1359,7 @@ export async function createPasswordReset(profileId: string): Promise<string> {
 }
 
 export async function findValidPasswordReset(token: string): Promise<{ profile_id: string } | null> {
-  const rows = await (await db())`SELECT profile_id, expires, used FROM password_resets WHERE token = ${token}`;
+  const rows = await sqlQ`SELECT profile_id, expires, used FROM password_resets WHERE token = ${token}`;
   if (rows.length === 0) return null;
   const r = rows[0];
   if (r.used || Number(r.expires) < Date.now()) return null;
@@ -1363,7 +1368,7 @@ export async function findValidPasswordReset(token: string): Promise<{ profile_i
 
 /** Applique le nouveau mot de passe, consomme le jeton et déconnecte toutes les sessions actives. */
 export async function resetPasswordWithToken(token: string, newPassword: string): Promise<{ error?: string }> {
-  const dbq = await db();
+  const dbq = await pgdb();
   const reset = await findValidPasswordReset(token);
   if (!reset) return { error: "Ce lien de réinitialisation est invalide ou a expiré." };
 
