@@ -16,10 +16,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Build: `npm run build`
 
 ## Environment variables
-- Firebase (Firestore + Storage), see `src/lib/firebase.ts`:
-  - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (service account key, from Firebase Console > Project Settings > Service accounts).
-  - `FIREBASE_STORAGE_BUCKET` (e.g. `your-project-id.appspot.com`) for documents/attachments content.
+- Postgres (Neon), see `src/lib/pg.ts` and `src/lib/queries.ts`:
+  - `DATABASE_URL` or `POSTGRES_URL` (pooled connection string, e.g. `postgresql://…@…-pooler.…neon.tech/…`).
+  - File contents (documents, meeting attachments) are stored in the DB itself (`bytea` columns).
   - `SEED_DEMO=true` to force-seed demo accounts (admin@demo.com / employe@demo.com) outside development.
+- Legacy: `src/lib/firebase.ts` keeps the old Firestore/Storage init (not used by the app anymore; only useful for one-off data syncs).
 - Email notifications (`src/lib/mail.ts`, nodemailer over SMTP). If `SMTP_HOST` is missing, emails are only logged to the console:
   - `SMTP_HOST`, `SMTP_PORT` (default 587, 465 = TLS implicit), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (e.g. `"Suivi Horaire <no-reply@example.com>"`).
 

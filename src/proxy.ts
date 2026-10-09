@@ -1,22 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getDb } from "@/lib/firebase";
-
-// Proxy (formerly "middleware") always runs on the Node.js runtime in
-// Next.js 16, so firebase-admin works fine here without extra config.
+import { neon } from "@neondatabase/serverless";
 
 // Cache en mémoire des validations de session (TTL court) : sinon chaque
-// requête authentifiée (page, navigation RSC, server action) fait une lecture
-// Firestore, ce qui épuise rapidement le quota quotidien gratuit.
+// requête authentifiée (page, navigation RSC, server action) fait une requête
+// Postgres. Le TTL de 60 s limite les allers-retours vers Neon sans bloquer
+// une déconnexion trop longtemps.
 const SESSION_CACHE_TTL_MS = 60_000;
 const sessionCache = new Map<string, { valid: boolean; checkedAt: number }>();
+
+function db() {
+  const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  if (!url) throw new Error("DATABASE_URL manquant");
+  return neon(url);
+}
 
 async function isSessionValid(token: string | undefined): Promise<boolean> {
   if (!token) return false;
   const cached = sessionCache.get(token);
   if (cached && Date.now() - cached.checkedAt < SESSION_CACHE_TTL_MS) return cached.valid;
-  const snap = await getDb().collection("sessions").doc(token).get();
-  const session = snap.data() as { expires: number } | undefined;
-  const valid = !!session && session.expires > Date.now();
+  const rows = await db()`SELECT expires FROM sessions WHERE token = ${token} LIMIT 1`;
+  const session = rows[0] as { expires: string | number } | undefined;
+  const valid = !!session && Number(session.expires) > Date.now();
   if (sessionCache.size > 5000) sessionCache.clear();
   sessionCache.set(token, { valid, checkedAt: Date.now() });
   return valid;
@@ -98,7 +102,7 @@ export default async function proxy(request: NextRequest) {
     path.startsWith("/_next") ||
     path.startsWith("/api");
   const token = request.cookies.get("session")?.value;
-  // Si Firestore est indisponible/quota épuisé, on traite la session comme
+  // Si la base est indisponible, on traite la session comme
   // invalide (redirection /login) plutôt que de faire planter la requête —
   // l'utilisateur voit la page de connexion au lieu d'un écran blanc.
   let authenticated = false;

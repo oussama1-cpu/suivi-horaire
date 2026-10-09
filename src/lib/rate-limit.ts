@@ -1,13 +1,13 @@
 import "server-only";
 import { headers } from "next/headers";
-import { getDb } from "./firebase";
+import { sql } from "./pg";
 import { generateId } from "./db";
 
 /**
  * Limitation de débit anti brute-force, persistée en base (fonctionne donc
  * aussi bien avec un serveur unique qu'avec plusieurs instances serverless).
- * Utilisée pour le login par mot de passe et le pointage par code PIN, qui
- * sont tous deux exposés sans authentification préalable.
+ * Utilisée pour le login par mot de passe, qui est exposé sans authentification
+ * préalable.
  */
 
 export async function getClientIp(): Promise<string> {
@@ -18,31 +18,22 @@ export async function getClientIp(): Promise<string> {
 }
 
 export async function isRateLimited(identifier: string, maxAttempts: number, windowMs: number): Promise<boolean> {
-  const cutoff = Date.now() - windowMs;
-  const snap = await getDb().collection("authAttempts").where("identifier", "==", identifier).get();
-  const count = snap.docs.filter((d) => (d.data().created_at_ms as number) > cutoff).length;
-  return count >= maxAttempts;
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
+  const rows = await sql()`SELECT count(*)::int AS n FROM auth_attempts
+    WHERE identifier = ${identifier} AND created_at > ${cutoff}`;
+  return Number(rows[0].n) >= maxAttempts;
 }
 
 export async function recordFailedAttempt(identifier: string): Promise<void> {
-  await getDb()
-    .collection("authAttempts")
-    .doc(generateId())
-    .set({ identifier, created_at_ms: Date.now() });
+  await sql()`INSERT INTO auth_attempts (id, identifier, created_at) VALUES (${generateId()}, ${identifier}, ${new Date().toISOString()})`;
 
-  // Nettoyage opportuniste (probabiliste) pour éviter la croissance illimitée de la collection.
+  // Nettoyage opportuniste (probabiliste) pour éviter la croissance illimitée de la table.
   if (Math.random() < 0.05) {
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const snap = await getDb().collection("authAttempts").where("created_at_ms", "<", dayAgo).get();
-    const batch = getDb().batch();
-    snap.docs.forEach((d) => batch.delete(d.ref));
-    if (snap.docs.length > 0) await batch.commit();
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    await sql()`DELETE FROM auth_attempts WHERE created_at < ${dayAgo}`;
   }
 }
 
 export async function clearAttempts(identifier: string): Promise<void> {
-  const snap = await getDb().collection("authAttempts").where("identifier", "==", identifier).get();
-  const batch = getDb().batch();
-  snap.docs.forEach((d) => batch.delete(d.ref));
-  if (snap.docs.length > 0) await batch.commit();
+  await sql()`DELETE FROM auth_attempts WHERE identifier = ${identifier}`;
 }

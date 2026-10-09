@@ -2,11 +2,11 @@ import "server-only";
 import crypto from "crypto";
 import { Profile } from "./types";
 
-// Data persistence lives in Firebase (Firestore + Storage) — see
-// src/lib/firebase.ts for the Admin SDK init, and src/lib/queries.ts for
-// the actual (async) data access functions. This module only keeps small
-// framework-agnostic helpers (password hashing, id generation) and shared
-// types used across the data layer.
+// Data persistence lives in Postgres (Neon) — see src/lib/pg.ts for the
+// client init, and src/lib/queries.ts for the actual (async) data access
+// functions. This module only keeps small framework-agnostic helpers
+// (password hashing, id generation) and shared types used across the data
+// layer.
 
 export interface StoredProfile extends Profile {
   password_hash: string;

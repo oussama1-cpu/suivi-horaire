@@ -1,7 +1,6 @@
 import "server-only";
 import path from "path";
-import { FieldValue } from "firebase-admin/firestore";
-import { getDb, getBucket, withSeed } from "./firebase";
+import { sql, withSeed, toIso } from "./pg";
 import { generateId, hashPassword, StoredProfile, DocumentRecord } from "./db";
 import { computeDayHours, NON_WORKING_DAY_TYPES } from "./hours";
 import { DEFAULT_WEEKDAY_HOURS, DEFAULT_WEEKLY_TARGET_HOURS } from "./constants";
@@ -27,9 +26,12 @@ import {
   OcrDraftStatus,
 } from "./types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
+
 async function db() {
   await withSeed();
-  return getDb();
+  return sql();
 }
 
 function stripPassword(p: StoredProfile): Profile {
@@ -38,53 +40,47 @@ function stripPassword(p: StoredProfile): Profile {
   return rest;
 }
 
-function mapProfileDoc(data: FirebaseFirestore.DocumentData): StoredProfile {
+function mapProfileRow(r: Row): StoredProfile {
   return {
-    id: data.id,
-    email: data.email,
-    full_name: data.full_name,
-    role: data.role,
-    function_title: data.function_title ?? null,
-    company: data.company,
-    phone: data.phone ?? null,
-    weekly_target_hours: Number(data.weekly_target_hours ?? 0),
-    weekday_hours: data.weekday_hours,
-    monthly_salary: Number(data.monthly_salary ?? 0),
-    conge_days_per_month: Number(data.conge_days_per_month ?? 1.5),
-    maladie_days_per_month: Number(data.maladie_days_per_month ?? 0.5),
-    active: !!data.active,
-    created_at: data.created_at,
-    password_hash: data.password_hash,
+    id: r.id,
+    email: r.email,
+    full_name: r.full_name,
+    role: r.role,
+    function_title: r.function_title ?? null,
+    company: r.company,
+    phone: r.phone ?? null,
+    weekly_target_hours: Number(r.weekly_target_hours ?? 0),
+    weekday_hours: r.weekday_hours,
+    monthly_salary: Number(r.monthly_salary ?? 0),
+    conge_days_per_month: Number(r.conge_days_per_month ?? 1.5),
+    maladie_days_per_month: Number(r.maladie_days_per_month ?? 0.5),
+    active: !!r.active,
+    created_at: toIso(r.created_at),
+    password_hash: r.password_hash,
   };
 }
 
 // --- Profiles ---------------------------------------------------------------------
 
 export async function findProfileByEmail(email: string): Promise<StoredProfile | null> {
-  const snap = await (await db())
-    .collection("profiles")
-    .where("email_lower", "==", email.toLowerCase())
-    .limit(1)
-    .get();
-  return snap.empty ? null : mapProfileDoc(snap.docs[0].data());
+  const rows = await (await db())`SELECT * FROM profiles WHERE lower(email) = lower(${email}) LIMIT 1`;
+  return rows.length ? mapProfileRow(rows[0]) : null;
 }
 
 export async function findProfileById(id: string): Promise<Profile | null> {
-  const snap = await (await db()).collection("profiles").doc(id).get();
-  return snap.exists ? stripPassword(mapProfileDoc(snap.data()!)) : null;
+  const rows = await (await db())`SELECT * FROM profiles WHERE id = ${id} LIMIT 1`;
+  return rows.length ? stripPassword(mapProfileRow(rows[0])) : null;
 }
 
 export async function listEmployees(): Promise<Profile[]> {
-  const snap = await (await db()).collection("profiles").where("role", "==", "employee").get();
-  return snap.docs
-    .map((d) => stripPassword(mapProfileDoc(d.data())))
-    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const rows = await (await db())`SELECT * FROM profiles WHERE role = 'employee'`;
+  return rows.map((r) => stripPassword(mapProfileRow(r))).sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
 export async function listAdmins(): Promise<Profile[]> {
-  const snap = await (await db()).collection("profiles").where("role", "==", "admin").get();
-  return snap.docs
-    .map((d) => stripPassword(mapProfileDoc(d.data())))
+  const rows = await (await db())`SELECT * FROM profiles WHERE role = 'admin'`;
+  return rows
+    .map((r) => stripPassword(mapProfileRow(r)))
     .filter((p) => p.active)
     .sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
@@ -110,27 +106,13 @@ export async function createEmployeeProfile(input: CreateProfileInput): Promise<
   const id = generateId();
   const now = new Date().toISOString();
 
-  await (await db())
-    .collection("profiles")
-    .doc(id)
-    .set({
-      id,
-      email: input.email,
-      email_lower: input.email.toLowerCase(),
-      full_name: input.full_name,
-      role: "employee",
-      function_title: input.function_title || null,
-      company: input.company,
-      phone: null,
-      weekly_target_hours: input.weekly_target_hours || DEFAULT_WEEKLY_TARGET_HOURS,
-      weekday_hours: input.weekday_hours || DEFAULT_WEEKDAY_HOURS,
-      active: true,
-      created_at: now,
-      password_hash: hashPassword(input.password),
-      monthly_salary: input.monthly_salary ?? 0,
-      conge_days_per_month: input.conge_days_per_month ?? 1.5,
-      maladie_days_per_month: input.maladie_days_per_month ?? 0.5,
-    });
+  await (await db())`INSERT INTO profiles
+    (id, email, full_name, role, function_title, company, phone, weekly_target_hours, weekday_hours,
+     active, created_at, password_hash, qr_token, pin_code, monthly_salary, conge_days_per_month, maladie_days_per_month)
+    VALUES (${id}, ${input.email}, ${input.full_name}, 'employee', ${input.function_title || null}, ${input.company},
+      NULL, ${input.weekly_target_hours || DEFAULT_WEEKLY_TARGET_HOURS}, ${JSON.stringify(input.weekday_hours || DEFAULT_WEEKDAY_HOURS)},
+      true, ${now}, ${hashPassword(input.password)}, ${generateId()}, NULL,
+      ${input.monthly_salary ?? 0}, ${input.conge_days_per_month ?? 1.5}, ${input.maladie_days_per_month ?? 0.5})`;
 
   return { id };
 }
@@ -142,14 +124,9 @@ export interface MonthlySettingsInput {
 }
 
 export async function updateMonthlySettings(id: string, input: MonthlySettingsInput): Promise<void> {
-  await (await db())
-    .collection("profiles")
-    .doc(id)
-    .update({
-      monthly_salary: input.monthly_salary,
-      conge_days_per_month: input.conge_days_per_month,
-      maladie_days_per_month: input.maladie_days_per_month,
-    });
+  await (await db())`UPDATE profiles SET monthly_salary = ${input.monthly_salary},
+    conge_days_per_month = ${input.conge_days_per_month}, maladie_days_per_month = ${input.maladie_days_per_month}
+    WHERE id = ${id}`;
 }
 
 export interface CreateComptableInput {
@@ -161,10 +138,8 @@ export interface CreateComptableInput {
 }
 
 export async function listComptables(): Promise<Profile[]> {
-  const snap = await (await db()).collection("profiles").where("role", "==", "comptable").get();
-  return snap.docs
-    .map((d) => stripPassword(mapProfileDoc(d.data())))
-    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const rows = await (await db())`SELECT * FROM profiles WHERE role = 'comptable'`;
+  return rows.map((r) => stripPassword(mapProfileRow(r))).sort((a, b) => a.full_name.localeCompare(b.full_name));
 }
 
 export async function createComptableProfile(input: CreateComptableInput): Promise<{ error?: string; id?: string }> {
@@ -175,27 +150,12 @@ export async function createComptableProfile(input: CreateComptableInput): Promi
   const id = generateId();
   const now = new Date().toISOString();
 
-  await (await db())
-    .collection("profiles")
-    .doc(id)
-    .set({
-      id,
-      email: input.email,
-      email_lower: input.email.toLowerCase(),
-      full_name: input.full_name,
-      role: "comptable",
-      function_title: input.function_title || null,
-      company: input.company,
-      phone: null,
-      weekly_target_hours: 0,
-      weekday_hours: DEFAULT_WEEKDAY_HOURS,
-      active: true,
-      created_at: now,
-      password_hash: hashPassword(input.password),
-      monthly_salary: 0,
-      conge_days_per_month: 1.5,
-      maladie_days_per_month: 0.5,
-    });
+  await (await db())`INSERT INTO profiles
+    (id, email, full_name, role, function_title, company, phone, weekly_target_hours, weekday_hours,
+     active, created_at, password_hash, qr_token, pin_code, monthly_salary, conge_days_per_month, maladie_days_per_month)
+    VALUES (${id}, ${input.email}, ${input.full_name}, 'comptable', ${input.function_title || null}, ${input.company},
+      NULL, 0, ${JSON.stringify(DEFAULT_WEEKDAY_HOURS)},
+      true, ${now}, ${hashPassword(input.password)}, ${generateId()}, NULL, 0, 1.5, 0.5)`;
 
   return { id };
 }
@@ -212,18 +172,11 @@ export interface UpdateProfileInput {
 }
 
 export async function updateProfile(input: UpdateProfileInput): Promise<{ error?: string }> {
-  await (await db())
-    .collection("profiles")
-    .doc(input.id)
-    .update({
-      full_name: input.full_name,
-      function_title: input.function_title || null,
-      company: input.company,
-      weekly_target_hours: input.weekly_target_hours,
-      weekday_hours: input.weekday_hours,
-      active: input.active,
-      phone: input.phone || null,
-    });
+  await (await db())`UPDATE profiles SET full_name = ${input.full_name},
+    function_title = ${input.function_title || null}, company = ${input.company},
+    weekly_target_hours = ${input.weekly_target_hours}, weekday_hours = ${JSON.stringify(input.weekday_hours)},
+    active = ${input.active}, phone = ${input.phone || null}
+    WHERE id = ${input.id}`;
   return {};
 }
 
@@ -240,65 +193,34 @@ export async function updateAccount(id: string, input: UpdateAccountInput): Prom
     const existing = await findProfileByEmail(input.email);
     if (existing && existing.id !== id) return { error: "Un autre compte utilise déjà cet email." };
   }
-
-  const fields: Record<string, unknown> = {};
-  if (input.email) {
-    fields.email = input.email;
-    fields.email_lower = input.email.toLowerCase();
-  }
-  if (input.password) fields.password_hash = hashPassword(input.password);
-  if (input.role) fields.role = input.role;
-  if (Object.keys(fields).length === 0) return {};
-
-  await (await db()).collection("profiles").doc(id).update(fields);
+  if (!input.email && !input.password && !input.role) return {};
+  const dbq = await db();
+  await dbq.query(
+    `UPDATE profiles SET
+      email = COALESCE($1, email),
+      password_hash = COALESCE($2, password_hash),
+      role = COALESCE($3, role)
+    WHERE id = $4`,
+    [input.email ?? null, input.password ? hashPassword(input.password) : null, input.role ?? null, id]
+  );
   return {};
 }
 
 /** Supprime en cascade (best-effort) tout ce qui référence ce profil. */
 export async function deleteProfile(id: string): Promise<void> {
-  const firestore = await db();
+  const dbq = await db();
 
-  async function deleteWhere(collection: string, field: string) {
-    const snap = await firestore.collection(collection).where(field, "==", id).get();
-    if (snap.empty) return;
-    const batch = firestore.batch();
-    snap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
+  for (const table of ["sessions", "time_entries", "leave_balances", "employee_tasks", "leave_requests", "notifications"]) {
+    await dbq.query(`DELETE FROM ${table} WHERE profile_id = $1`, [id]);
   }
 
-  await Promise.all([
-    deleteWhere("sessions", "profile_id"),
-    deleteWhere("timeEntries", "profile_id"),
-    deleteWhere("leaveBalances", "profile_id"),
-    deleteWhere("employeeTasks", "profile_id"),
-    deleteWhere("leaveRequests", "profile_id"),
-    deleteWhere("notifications", "profile_id"),
-  ]);
-
-  // Documents : suppression du contenu dans Storage puis des métadonnées.
-  const docsSnap = await firestore.collection("documents").where("profile_id", "==", id).get();
-  await Promise.all(docsSnap.docs.map((d) => getBucket().file(`documents/${d.id}`).delete({ ignoreNotFound: true })));
-  if (!docsSnap.empty) {
-    const batch = firestore.batch();
-    docsSnap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-
-  // Messages envoyés/reçus par ce profil.
-  const msgSnap = await firestore.collection("messages").where("participant_ids", "array-contains", id).get();
-  if (!msgSnap.empty) {
-    const batch = firestore.batch();
-    msgSnap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-
-  // Retire ce profil des listes de participants aux réunions.
-  const meetingsSnap = await firestore.collection("meetings").where("participant_ids", "array-contains", id).get();
-  await Promise.all(
-    meetingsSnap.docs.map((d) => d.ref.update({ participant_ids: FieldValue.arrayRemove(id) }))
-  );
-
-  await firestore.collection("profiles").doc(id).delete();
+  await dbq.query(`DELETE FROM documents WHERE profile_id = $1`, [id]);
+  await dbq.query(`DELETE FROM messages WHERE $1 = ANY(participant_ids)`, [id]);
+  await dbq.query(`DELETE FROM meeting_participants WHERE profile_id = $1`, [id]);
+  await dbq.query(`DELETE FROM message_reads WHERE profile_id = $1`, [id]);
+  await dbq.query(`DELETE FROM ocr_drafts WHERE profile_id = $1`, [id]);
+  await dbq.query(`DELETE FROM password_resets WHERE profile_id = $1`, [id]);
+  await dbq.query(`DELETE FROM profiles WHERE id = $1`, [id]);
 }
 
 // --- Leave balances (non utilisé actuellement par l'UI, conservé pour compatibilité) ---
@@ -308,11 +230,15 @@ function leaveBalanceDocId(profileId: string, year: number, leaveType: string) {
 }
 
 export async function getLeaveBalances(profileId: string, year: number): Promise<LeaveBalance[]> {
-  const snap = await (await db()).collection("leaveBalances").where("profile_id", "==", profileId).get();
-  return snap.docs
-    .map((d) => d.data() as LeaveBalance)
-    .filter((b) => b.year === year)
-    .map((b) => ({ ...b, total: Number(b.total), used: Number(b.used) }));
+  const rows = await (await db())`SELECT * FROM leave_balances WHERE profile_id = ${profileId} AND year = ${year}`;
+  return rows.map((r) => ({
+    id: r.id,
+    profile_id: r.profile_id,
+    year: Number(r.year),
+    leave_type: r.leave_type,
+    total: Number(r.total),
+    used: Number(r.used),
+  }));
 }
 
 export async function upsertLeaveBalance(
@@ -321,16 +247,10 @@ export async function upsertLeaveBalance(
   leaveType: "conge" | "maladie",
   total: number
 ): Promise<void> {
-  const ref = (await db()).collection("leaveBalances").doc(leaveBalanceDocId(profileId, year, leaveType));
-  const snap = await ref.get();
-  await ref.set({
-    id: snap.exists ? snap.data()!.id : generateId(),
-    profile_id: profileId,
-    year,
-    leave_type: leaveType,
-    total,
-    used: snap.exists ? snap.data()!.used : 0,
-  });
+  const id = leaveBalanceDocId(profileId, year, leaveType);
+  await (await db())`INSERT INTO leave_balances (id, profile_id, year, leave_type, total, used)
+    VALUES (${id}, ${profileId}, ${year}, ${leaveType}, ${total}, 0)
+    ON CONFLICT (id) DO UPDATE SET total = ${total}`;
 }
 
 // --- Time entries -------------------------------------------------------------------
@@ -339,29 +259,29 @@ function timeEntryDocId(profileId: string, date: string) {
   return `${profileId}__${date}`;
 }
 
-function mapTimeEntryData(data: FirebaseFirestore.DocumentData): TimeEntry {
+function mapTimeEntryRow(r: Row): TimeEntry {
   return {
-    id: data.id,
-    profile_id: data.profile_id,
-    entry_date: data.entry_date,
-    day_type: data.day_type,
-    work_mode: data.work_mode ?? null,
-    start_time: data.start_time ?? null,
-    end_time: data.end_time ?? null,
-    break_minutes: Number(data.break_minutes ?? 0),
-    break_start: data.break_start ?? null,
-    hours: Number(data.hours ?? 0),
-    tasks: data.tasks ?? null,
-    remarks: data.remarks ?? null,
-    imported: !!data.imported,
-    created_at: data.created_at,
-    updated_at: data.updated_at,
+    id: r.id,
+    profile_id: r.profile_id,
+    entry_date: r.entry_date,
+    day_type: r.day_type,
+    work_mode: r.work_mode ?? null,
+    start_time: r.start_time ?? null,
+    end_time: r.end_time ?? null,
+    break_minutes: Number(r.break_minutes ?? 0),
+    break_start: r.break_start ?? null,
+    hours: Number(r.hours ?? 0),
+    tasks: r.tasks ?? null,
+    remarks: r.remarks ?? null,
+    imported: !!r.imported,
+    created_at: toIso(r.created_at),
+    updated_at: toIso(r.updated_at),
   };
 }
 
 async function readTimeEntry(profileId: string, date: string): Promise<TimeEntry | null> {
-  const snap = await (await db()).collection("timeEntries").doc(timeEntryDocId(profileId, date)).get();
-  return snap.exists ? mapTimeEntryData(snap.data()!) : null;
+  const rows = await (await db())`SELECT * FROM time_entries WHERE id = ${timeEntryDocId(profileId, date)}`;
+  return rows.length ? mapTimeEntryRow(rows[0]) : null;
 }
 
 /** Écrit une entrée en préservant les champs non fournis (comme un UPDATE partiel SQL). */
@@ -370,51 +290,52 @@ async function writeTimeEntry(
   date: string,
   fields: Partial<Omit<TimeEntry, "id" | "profile_id" | "entry_date" | "created_at" | "updated_at">>
 ): Promise<TimeEntry> {
-  const firestore = await db();
-  const ref = firestore.collection("timeEntries").doc(timeEntryDocId(profileId, date));
-  const existing = await ref.get();
+  const dbq = await db();
+  const id = timeEntryDocId(profileId, date);
+  const existingRows = await dbq`SELECT * FROM time_entries WHERE id = ${id}`;
+  const existing = existingRows.length ? existingRows[0] : null;
   const now = new Date().toISOString();
-  const base = {
-    day_type: "normal" as DayType,
-    work_mode: null as WorkMode,
-    start_time: null as string | null,
-    end_time: null as string | null,
-    break_minutes: 0,
-    break_start: null as string | null,
-    hours: 0,
-    tasks: null as string | null,
-    remarks: null as string | null,
-    imported: false,
-  };
-  const data = {
-    ...base,
-    ...(existing.exists ? existing.data() : {}),
+
+  const merged = {
+    day_type: (existing?.day_type ?? "normal") as DayType,
+    work_mode: (existing?.work_mode ?? null) as WorkMode,
+    start_time: existing?.start_time ?? null,
+    end_time: existing?.end_time ?? null,
+    break_minutes: Number(existing?.break_minutes ?? 0),
+    break_start: existing?.break_start ?? null,
+    hours: Number(existing?.hours ?? 0),
+    tasks: existing?.tasks ?? null,
+    remarks: existing?.remarks ?? null,
+    imported: !!existing?.imported,
     ...fields,
-    id: timeEntryDocId(profileId, date),
-    profile_id: profileId,
-    entry_date: date,
-    created_at: existing.exists ? existing.data()!.created_at : now,
-    updated_at: now,
   };
-  await ref.set(data);
-  return mapTimeEntryData(data);
+
+  await dbq`INSERT INTO time_entries
+    (id, profile_id, entry_date, day_type, work_mode, start_time, end_time, break_minutes, break_start, hours, tasks, remarks, imported, created_at, updated_at)
+    VALUES (${id}, ${profileId}, ${date}, ${merged.day_type}, ${merged.work_mode}, ${merged.start_time},
+      ${merged.end_time}, ${merged.break_minutes}, ${merged.break_start}, ${merged.hours},
+      ${merged.tasks}, ${merged.remarks}, ${merged.imported},
+      ${existing ? toIso(existing.created_at) : now}, ${now})
+    ON CONFLICT (id) DO UPDATE SET
+      day_type = EXCLUDED.day_type, work_mode = EXCLUDED.work_mode, start_time = EXCLUDED.start_time,
+      end_time = EXCLUDED.end_time, break_minutes = EXCLUDED.break_minutes, break_start = EXCLUDED.break_start,
+      hours = EXCLUDED.hours, tasks = EXCLUDED.tasks, remarks = EXCLUDED.remarks, imported = EXCLUDED.imported,
+      updated_at = EXCLUDED.updated_at`;
+
+  return mapTimeEntryRow({ ...merged, id, profile_id: profileId, entry_date: date, created_at: existing ? existing.created_at : now, updated_at: now });
 }
 
 export async function getEntriesInRange(profileId: string, start: string, end: string): Promise<TimeEntry[]> {
-  const snap = await (await db()).collection("timeEntries").where("profile_id", "==", profileId).get();
-  return snap.docs
-    .map((d) => mapTimeEntryData(d.data()))
-    .filter((e) => e.entry_date >= start && e.entry_date <= end)
-    .sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+  const rows = await (await db())`SELECT * FROM time_entries
+    WHERE profile_id = ${profileId} AND entry_date >= ${start} AND entry_date <= ${end}
+    ORDER BY entry_date`;
+  return rows.map(mapTimeEntryRow);
 }
 
 export async function getAllEntriesInRange(start: string, end: string): Promise<TimeEntry[]> {
-  const snap = await (await db())
-    .collection("timeEntries")
-    .where("entry_date", ">=", start)
-    .where("entry_date", "<=", end)
-    .get();
-  return snap.docs.map((d) => mapTimeEntryData(d.data()));
+  const rows = await (await db())`SELECT * FROM time_entries
+    WHERE entry_date >= ${start} AND entry_date <= ${end}`;
+  return rows.map(mapTimeEntryRow);
 }
 
 export interface UpsertEntryInput {
@@ -431,9 +352,9 @@ export interface UpsertEntryInput {
 }
 
 export async function upsertEntry(input: UpsertEntryInput): Promise<{ error?: string; hours?: number }> {
-  const profileSnap = await (await db()).collection("profiles").doc(input.profile_id).get();
-  if (!profileSnap.exists) return { error: "Employé introuvable." };
-  const weekdayHours = profileSnap.data()!.weekday_hours as WeekdayHours;
+  const profiles = await (await db())`SELECT weekday_hours FROM profiles WHERE id = ${input.profile_id}`;
+  if (profiles.length === 0) return { error: "Employé introuvable." };
+  const weekdayHours = profiles[0].weekday_hours as WeekdayHours;
 
   const hours = computeDayHours(
     {
@@ -472,16 +393,12 @@ export interface BulkDayTypeUpdate {
  */
 export async function bulkSetDayType(updates: BulkDayTypeUpdate[], removableTypes: DayType[]): Promise<void> {
   if (updates.length === 0) return;
-  const firestore = await db();
+  const dbq = await db();
 
   const profileIds = [...new Set(updates.map((u) => u.profile_id))];
   const weekdayHoursById = new Map<string, WeekdayHours>();
-  await Promise.all(
-    profileIds.map(async (id) => {
-      const snap = await firestore.collection("profiles").doc(id).get();
-      if (snap.exists) weekdayHoursById.set(id, snap.data()!.weekday_hours);
-    })
-  );
+  const profileRows = await dbq.query(`SELECT id, weekday_hours FROM profiles WHERE id = ANY($1)`, [profileIds]);
+  for (const r of profileRows) weekdayHoursById.set(r.id, r.weekday_hours);
 
   for (const u of updates) {
     const weekdayHours = weekdayHoursById.get(u.profile_id);
@@ -490,7 +407,7 @@ export async function bulkSetDayType(updates: BulkDayTypeUpdate[], removableType
     if (u.day_type === null) {
       const existing = await readTimeEntry(u.profile_id, u.entry_date);
       if (existing && removableTypes.includes(existing.day_type)) {
-        await firestore.collection("timeEntries").doc(timeEntryDocId(u.profile_id, u.entry_date)).delete();
+        await dbq`DELETE FROM time_entries WHERE id = ${timeEntryDocId(u.profile_id, u.entry_date)}`;
       }
       continue;
     }
@@ -530,26 +447,26 @@ export async function bulkSetDayType(updates: BulkDayTypeUpdate[], removableType
 }
 
 export async function deleteEntry(id: string): Promise<void> {
-  await (await db()).collection("timeEntries").doc(id).delete();
+  await (await db())`DELETE FROM time_entries WHERE id = ${id}`;
 }
 
 export async function getEntryByDate(profileId: string, date: string): Promise<TimeEntry | null> {
   return readTimeEntry(profileId, date);
 }
 
-// --- Documents (métadonnées Firestore + contenu Firebase Storage) ------------------
+// --- Documents (métadonnées + contenu stockés en base, colonne bytea) ------------------
 
-function mapDocumentData(data: FirebaseFirestore.DocumentData): DocumentRecord {
+function mapDocumentRow(r: Row): DocumentRecord {
   return {
-    id: data.id,
-    profile_id: data.profile_id,
-    file_name: data.file_name,
-    original_name: data.original_name,
-    mime_type: data.mime_type,
-    size: Number(data.size),
-    note: data.note ?? null,
-    category: data.category,
-    uploaded_at: data.uploaded_at,
+    id: r.id,
+    profile_id: r.profile_id,
+    file_name: r.file_name,
+    original_name: r.original_name,
+    mime_type: r.mime_type,
+    size: Number(r.size),
+    note: r.note ?? null,
+    category: r.category,
+    uploaded_at: toIso(r.uploaded_at),
   };
 }
 
@@ -569,32 +486,23 @@ export async function createDocument(input: CreateDocumentInput): Promise<Docume
   const file_name = `${id}${ext}`;
   const now = new Date().toISOString();
 
-  await getBucket().file(`documents/${id}`).save(input.buffer, { contentType: input.mime_type });
+  await (await db())`INSERT INTO documents
+    (id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at, content)
+    VALUES (${id}, ${input.profile_id}, ${file_name}, ${input.original_name}, ${input.mime_type},
+      ${input.size}, ${input.note ? input.note.trim() : null}, ${input.category}, ${now}, ${input.buffer})`;
 
-  const data = {
-    id,
-    profile_id: input.profile_id,
-    file_name,
-    original_name: input.original_name,
-    mime_type: input.mime_type,
-    size: input.size,
-    note: input.note ? input.note.trim() : null,
-    category: input.category,
-    uploaded_at: now,
-  };
-  await (await db()).collection("documents").doc(id).set(data);
-  return mapDocumentData(data);
+  return mapDocumentRow({ id, profile_id: input.profile_id, file_name, original_name: input.original_name, mime_type: input.mime_type, size: input.size, note: input.note ? input.note.trim() : null, category: input.category, uploaded_at: now });
 }
 
 export async function listDocumentsByProfile(
   profileId: string,
   category?: DocumentRecord["category"]
 ): Promise<DocumentRecord[]> {
-  const snap = await (await db()).collection("documents").where("profile_id", "==", profileId).get();
-  return snap.docs
-    .map((d) => mapDocumentData(d.data()))
-    .filter((d) => !category || d.category === category)
-    .sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+  const dbq = await db();
+  const rows = category
+    ? await dbq`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE profile_id = ${profileId} AND category = ${category} ORDER BY uploaded_at DESC`
+    : await dbq`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE profile_id = ${profileId} ORDER BY uploaded_at DESC`;
+  return rows.map(mapDocumentRow);
 }
 
 /** Compte les documents d'une catégorie pour plusieurs profils en une seule requête
@@ -605,37 +513,29 @@ export async function countDocumentsByProfiles(
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (profileIds.length === 0) return result;
-  const idSet = new Set(profileIds);
-  const snap = await (await db()).collection("documents").where("category", "==", category).get();
-  for (const doc of snap.docs) {
-    const profileId = doc.data().profile_id as string;
-    if (idSet.has(profileId)) result.set(profileId, (result.get(profileId) ?? 0) + 1);
-  }
+  const rows = await (await db())`SELECT profile_id, count(*)::int AS n FROM documents
+    WHERE category = ${category} AND profile_id = ANY(${profileIds}) GROUP BY profile_id`;
+  for (const r of rows) result.set(r.profile_id, Number(r.n));
   return result;
 }
 
 export async function getDocumentById(id: string): Promise<DocumentRecord | null> {
-  const snap = await (await db()).collection("documents").doc(id).get();
-  return snap.exists ? mapDocumentData(snap.data()!) : null;
+  const rows = await (await db())`SELECT id, profile_id, file_name, original_name, mime_type, size, note, category, uploaded_at FROM documents WHERE id = ${id}`;
+  return rows.length ? mapDocumentRow(rows[0]) : null;
 }
 
 export async function getDocumentContent(
   id: string
 ): Promise<{ content: Buffer; mime_type: string; original_name: string } | null> {
-  const snap = await (await db()).collection("documents").doc(id).get();
-  if (!snap.exists) return null;
-  const data = snap.data()!;
-  const [content] = await getBucket().file(`documents/${id}`).download();
-  return { content, mime_type: data.mime_type, original_name: data.original_name };
+  const rows = await (await db())`SELECT content, mime_type, original_name FROM documents WHERE id = ${id}`;
+  if (rows.length === 0 || !rows[0].content) return null;
+  const content = Buffer.isBuffer(rows[0].content) ? rows[0].content : Buffer.from(rows[0].content, "base64");
+  return { content, mime_type: rows[0].mime_type, original_name: rows[0].original_name };
 }
 
 export async function deleteDocumentRecord(id: string): Promise<{ error?: string }> {
-  const ref = (await db()).collection("documents").doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) return { error: "Document introuvable." };
-  await getBucket().file(`documents/${id}`).delete({ ignoreNotFound: true });
-  await ref.delete();
-  return {};
+  const rows = await (await db())`DELETE FROM documents WHERE id = ${id} RETURNING id`;
+  return rows.length ? {} : { error: "Document introuvable." };
 }
 
 function nowHHMM(): string {
@@ -648,8 +548,8 @@ function todayStr(): string {
 }
 
 async function getWeekdayHours(profileId: string): Promise<WeekdayHours | null> {
-  const snap = await (await db()).collection("profiles").doc(profileId).get();
-  return snap.exists ? snap.data()!.weekday_hours ?? null : null;
+  const rows = await (await db())`SELECT weekday_hours FROM profiles WHERE id = ${profileId}`;
+  return rows.length ? (rows[0].weekday_hours as WeekdayHours) ?? null : null;
 }
 
 export async function punchIn(
@@ -759,17 +659,17 @@ export async function punchOut(profileId: string): Promise<{ error?: string; ent
 
 // --- Employee tasks --------------------------------------------------------------
 
-function mapTaskData(data: FirebaseFirestore.DocumentData): EmployeeTask {
+function mapTaskRow(r: Row): EmployeeTask {
   return {
-    id: data.id,
-    profile_id: data.profile_id,
-    task_date: data.task_date,
-    title: data.title,
-    description: data.description ?? null,
-    is_innovation: !!data.is_innovation,
-    done: !!data.done,
-    created_at: data.created_at,
-    updated_at: data.updated_at,
+    id: r.id,
+    profile_id: r.profile_id,
+    task_date: r.task_date,
+    title: r.title,
+    description: r.description ?? null,
+    is_innovation: !!r.is_innovation,
+    done: !!r.done,
+    created_at: toIso(r.created_at),
+    updated_at: toIso(r.updated_at),
   };
 }
 
@@ -780,19 +680,15 @@ function sortTasks(tasks: EmployeeTask[]): EmployeeTask[] {
 }
 
 export async function listTasks(profileId: string, start: string, end: string): Promise<EmployeeTask[]> {
-  const snap = await (await db()).collection("employeeTasks").where("profile_id", "==", profileId).get();
-  return sortTasks(
-    snap.docs.map((d) => mapTaskData(d.data())).filter((t) => t.task_date >= start && t.task_date <= end)
-  );
+  const rows = await (await db())`SELECT * FROM employee_tasks
+    WHERE profile_id = ${profileId} AND task_date >= ${start} AND task_date <= ${end}`;
+  return sortTasks(rows.map(mapTaskRow));
 }
 
 export async function listAllTasks(start: string, end: string): Promise<EmployeeTask[]> {
-  const snap = await (await db())
-    .collection("employeeTasks")
-    .where("task_date", ">=", start)
-    .where("task_date", "<=", end)
-    .get();
-  return sortTasks(snap.docs.map((d) => mapTaskData(d.data())));
+  const rows = await (await db())`SELECT * FROM employee_tasks
+    WHERE task_date >= ${start} AND task_date <= ${end}`;
+  return sortTasks(rows.map(mapTaskRow));
 }
 
 export interface CreateTaskInput {
@@ -806,71 +702,60 @@ export interface CreateTaskInput {
 export async function createTask(input: CreateTaskInput): Promise<EmployeeTask> {
   const id = generateId();
   const now = new Date().toISOString();
-  const data = {
-    id,
-    profile_id: input.profile_id,
-    task_date: input.task_date,
-    title: input.title.trim(),
-    description: input.description.trim() || null,
-    is_innovation: input.is_innovation,
-    done: false,
-    created_at: now,
-    updated_at: now,
-  };
-  await (await db()).collection("employeeTasks").doc(id).set(data);
-  return mapTaskData(data);
+  await (await db())`INSERT INTO employee_tasks
+    (id, profile_id, task_date, title, description, is_innovation, done, created_at, updated_at)
+    VALUES (${id}, ${input.profile_id}, ${input.task_date}, ${input.title.trim()},
+      ${input.description.trim() || null}, ${input.is_innovation}, false, ${now}, ${now})`;
+  return mapTaskRow({ id, profile_id: input.profile_id, task_date: input.task_date, title: input.title.trim(), description: input.description.trim() || null, is_innovation: input.is_innovation, done: false, created_at: now, updated_at: now });
 }
 
 export async function setTaskDone(id: string, profileId: string, done: boolean): Promise<void> {
-  const ref = (await db()).collection("employeeTasks").doc(id);
-  const snap = await ref.get();
-  if (!snap.exists || snap.data()!.profile_id !== profileId) return;
-  await ref.update({ done, updated_at: new Date().toISOString() });
+  await (await db())`UPDATE employee_tasks SET done = ${done}, updated_at = ${new Date().toISOString()}
+    WHERE id = ${id} AND profile_id = ${profileId}`;
 }
 
 export async function deleteTask(id: string, profileId: string): Promise<void> {
-  const ref = (await db()).collection("employeeTasks").doc(id);
-  const snap = await ref.get();
-  if (!snap.exists || snap.data()!.profile_id !== profileId) return;
-  await ref.delete();
+  await (await db())`DELETE FROM employee_tasks WHERE id = ${id} AND profile_id = ${profileId}`;
 }
 
 // --- Leave requests ---------------------------------------------------------------
 
-function mapLeaveRequestData(data: FirebaseFirestore.DocumentData): LeaveRequest {
+function mapLeaveRequestRow(r: Row): LeaveRequest {
   return {
-    id: data.id,
-    profile_id: data.profile_id,
-    leave_type: data.leave_type,
-    start_date: data.start_date,
-    end_date: data.end_date,
-    comment: data.comment ?? null,
-    status: data.status,
-    admin_comment: data.admin_comment ?? null,
-    created_at: data.created_at,
-    decided_at: data.decided_at ?? null,
+    id: r.id,
+    profile_id: r.profile_id,
+    leave_type: r.leave_type,
+    start_date: r.start_date,
+    end_date: r.end_date,
+    comment: r.comment ?? null,
+    status: r.status,
+    admin_comment: r.admin_comment ?? null,
+    created_at: toIso(r.created_at),
+    decided_at: r.decided_at ? toIso(r.decided_at) : null,
   };
 }
 
 export async function listLeaveRequests(profileId: string): Promise<LeaveRequest[]> {
-  const snap = await (await db()).collection("leaveRequests").where("profile_id", "==", profileId).get();
-  return snap.docs.map((d) => mapLeaveRequestData(d.data())).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const rows = await (await db())`SELECT * FROM leave_requests WHERE profile_id = ${profileId} ORDER BY created_at DESC`;
+  return rows.map(mapLeaveRequestRow);
 }
 
 export async function listAllLeaveRequests(status?: LeaveRequestStatus): Promise<LeaveRequest[]> {
-  const col = (await db()).collection("leaveRequests");
-  const snap = status ? await col.where("status", "==", status).get() : await col.get();
-  return snap.docs.map((d) => mapLeaveRequestData(d.data())).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const dbq = await db();
+  const rows = status
+    ? await dbq`SELECT * FROM leave_requests WHERE status = ${status} ORDER BY created_at DESC`
+    : await dbq`SELECT * FROM leave_requests ORDER BY created_at DESC`;
+  return rows.map(mapLeaveRequestRow);
 }
 
 export async function countPendingLeaveRequests(): Promise<number> {
-  const snap = await (await db()).collection("leaveRequests").where("status", "==", "pending").get();
-  return snap.size;
+  const rows = await (await db())`SELECT count(*)::int AS n FROM leave_requests WHERE status = 'pending'`;
+  return Number(rows[0].n);
 }
 
 export async function getLeaveRequestById(id: string): Promise<LeaveRequest | null> {
-  const snap = await (await db()).collection("leaveRequests").doc(id).get();
-  return snap.exists ? mapLeaveRequestData(snap.data()!) : null;
+  const rows = await (await db())`SELECT * FROM leave_requests WHERE id = ${id}`;
+  return rows.length ? mapLeaveRequestRow(rows[0]) : null;
 }
 
 export interface CreateLeaveRequestInput {
@@ -883,29 +768,18 @@ export interface CreateLeaveRequestInput {
 
 export async function createLeaveRequest(input: CreateLeaveRequestInput): Promise<LeaveRequest> {
   const id = generateId();
-  const data = {
-    id,
-    profile_id: input.profile_id,
-    leave_type: input.leave_type,
-    start_date: input.start_date,
-    end_date: input.end_date,
-    comment: input.comment.trim() || null,
-    status: "pending" as LeaveRequestStatus,
-    admin_comment: null,
-    created_at: new Date().toISOString(),
-    decided_at: null,
-  };
-  await (await db()).collection("leaveRequests").doc(id).set(data);
-  return mapLeaveRequestData(data);
+  const now = new Date().toISOString();
+  await (await db())`INSERT INTO leave_requests
+    (id, profile_id, leave_type, start_date, end_date, comment, status, admin_comment, created_at, decided_at)
+    VALUES (${id}, ${input.profile_id}, ${input.leave_type}, ${input.start_date}, ${input.end_date},
+      ${input.comment.trim() || null}, 'pending', NULL, ${now}, NULL)`;
+  return mapLeaveRequestRow({ id, profile_id: input.profile_id, leave_type: input.leave_type, start_date: input.start_date, end_date: input.end_date, comment: input.comment.trim() || null, status: "pending", admin_comment: null, created_at: now, decided_at: null });
 }
 
 export async function cancelLeaveRequest(id: string, profileId: string): Promise<{ error?: string }> {
-  const ref = (await db()).collection("leaveRequests").doc(id);
-  const snap = await ref.get();
-  if (!snap.exists || snap.data()!.profile_id !== profileId || snap.data()!.status !== "pending") {
-    return { error: "Seule une demande en attente peut être annulée." };
-  }
-  await ref.delete();
+  const rows = await (await db())`DELETE FROM leave_requests
+    WHERE id = ${id} AND profile_id = ${profileId} AND status = 'pending' RETURNING id`;
+  if (rows.length === 0) return { error: "Seule une demande en attente peut être annulée." };
   return {};
 }
 
@@ -914,28 +788,25 @@ export async function decideLeaveRequest(
   status: Exclude<LeaveRequestStatus, "pending">,
   adminComment: string
 ): Promise<{ error?: string; request?: LeaveRequest }> {
-  const ref = (await db()).collection("leaveRequests").doc(id);
-  const snap = await ref.get();
-  if (!snap.exists || snap.data()!.status !== "pending") {
-    return { error: "Demande introuvable ou déjà traitée." };
-  }
-  const update = { status, admin_comment: adminComment.trim() || null, decided_at: new Date().toISOString() };
-  await ref.update(update);
-  return { request: mapLeaveRequestData({ ...snap.data(), ...update }) };
+  const rows = await (await db())`UPDATE leave_requests
+    SET status = ${status}, admin_comment = ${adminComment.trim() || null}, decided_at = ${new Date().toISOString()}
+    WHERE id = ${id} AND status = 'pending' RETURNING *`;
+  if (rows.length === 0) return { error: "Demande introuvable ou déjà traitée." };
+  return { request: mapLeaveRequestRow(rows[0]) };
 }
 
 // --- In-app notifications ---------------------------------------------------------
 
-function mapNotificationData(data: FirebaseFirestore.DocumentData): AppNotification {
+function mapNotificationRow(r: Row): AppNotification {
   return {
-    id: data.id,
-    profile_id: data.profile_id,
-    type: data.type,
-    title: data.title,
-    body: data.body ?? null,
-    link: data.link ?? null,
-    read: !!data.read,
-    created_at: data.created_at,
+    id: r.id,
+    profile_id: r.profile_id,
+    type: r.type,
+    title: r.title,
+    body: r.body ?? null,
+    link: r.link ?? null,
+    read: !!r.read,
+    created_at: toIso(r.created_at),
   };
 }
 
@@ -949,55 +820,32 @@ export interface NotificationInput {
 export async function createNotifications(profileIds: string[], input: NotificationInput): Promise<void> {
   const ids = [...new Set(profileIds)].filter(Boolean);
   if (ids.length === 0) return;
-  const firestore = await db();
+  const dbq = await db();
   const now = new Date().toISOString();
-  const batch = firestore.batch();
-  for (const profileId of ids) {
-    const id = generateId();
-    batch.set(firestore.collection("notifications").doc(id), {
-      id,
-      profile_id: profileId,
-      type: input.type,
-      title: input.title,
-      body: input.body ?? null,
-      link: input.link ?? null,
-      read: false,
-      created_at: now,
-    });
-  }
-  await batch.commit();
+  await dbq.query(
+    `INSERT INTO notifications (id, profile_id, type, title, body, link, read, created_at)
+     SELECT gen_random_uuid()::text, pid, $2, $3, $4, $5, false, $6 FROM unnest($1::text[]) AS pid`,
+    [ids, input.type, input.title, input.body ?? null, input.link ?? null, now]
+  );
 }
 
 export async function listNotifications(profileId: string, limit = 15): Promise<AppNotification[]> {
-  const snap = await (await db()).collection("notifications").where("profile_id", "==", profileId).get();
-  return snap.docs
-    .map((d) => mapNotificationData(d.data()))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, limit);
+  const rows = await (await db())`SELECT * FROM notifications WHERE profile_id = ${profileId}
+    ORDER BY created_at DESC LIMIT ${limit}`;
+  return rows.map(mapNotificationRow);
 }
 
 export async function countUnreadNotifications(profileId: string): Promise<number> {
-  const snap = await (await db()).collection("notifications").where("profile_id", "==", profileId).get();
-  return snap.docs.filter((d) => !d.data().read).length;
+  const rows = await (await db())`SELECT count(*)::int AS n FROM notifications WHERE profile_id = ${profileId} AND read = false`;
+  return Number(rows[0].n);
 }
 
 export async function markNotificationsRead(profileId: string, ids?: string[]): Promise<void> {
-  const firestore = await db();
-  const col = firestore.collection("notifications");
+  const dbq = await db();
   if (ids && ids.length > 0) {
-    const batch = firestore.batch();
-    for (const id of ids) {
-      const snap = await col.doc(id).get();
-      if (snap.exists && snap.data()!.profile_id === profileId) batch.update(snap.ref, { read: true });
-    }
-    await batch.commit();
+    await dbq`UPDATE notifications SET read = true WHERE profile_id = ${profileId} AND id = ANY(${ids})`;
   } else {
-    const snap = await col.where("profile_id", "==", profileId).get();
-    const unread = snap.docs.filter((d) => !d.data().read);
-    if (unread.length === 0) return;
-    const batch = firestore.batch();
-    unread.forEach((d) => batch.update(d.ref, { read: true }));
-    await batch.commit();
+    await dbq`UPDATE notifications SET read = true WHERE profile_id = ${profileId} AND read = false`;
   }
 }
 
@@ -1008,26 +856,26 @@ function sortByRoleThenName(a: Profile, b: Profile): number {
 }
 
 export async function listAllAccounts(): Promise<Profile[]> {
-  const snap = await (await db()).collection("profiles").get();
-  return snap.docs.map((d) => stripPassword(mapProfileDoc(d.data()))).sort(sortByRoleThenName);
+  const rows = await (await db())`SELECT * FROM profiles`;
+  return rows.map((r) => stripPassword(mapProfileRow(r))).sort(sortByRoleThenName);
 }
 
 // --- Réunions ----------------------------------------------------------------
 
-function mapMeetingData(data: FirebaseFirestore.DocumentData): Meeting {
+function mapMeetingRow(r: Row): Meeting {
   return {
-    id: data.id,
-    title: data.title,
-    description: data.description ?? null,
-    location: data.location ?? null,
-    meeting_link: data.meeting_link ?? null,
-    start_at: data.start_at,
-    end_at: data.end_at ?? null,
-    created_by: data.created_by,
-    recurrence: data.recurrence,
-    minutes: data.minutes ?? null,
-    created_at: data.created_at,
-    updated_at: data.updated_at,
+    id: r.id,
+    title: r.title,
+    description: r.description ?? null,
+    location: r.location ?? null,
+    meeting_link: r.meeting_link ?? null,
+    start_at: toIso(r.start_at),
+    end_at: r.end_at ? toIso(r.end_at) : null,
+    created_by: r.created_by,
+    recurrence: r.recurrence,
+    minutes: r.minutes ?? null,
+    created_at: toIso(r.created_at),
+    updated_at: toIso(r.updated_at),
   };
 }
 
@@ -1068,28 +916,24 @@ export async function createMeeting(input: CreateMeetingInput): Promise<Meeting[
     }
   }
 
-  const firestore = await db();
+  const dbq = await db();
   const now = new Date().toISOString();
   const created: Meeting[] = [];
   for (const occ of occurrences) {
     const id = generateId();
-    const data = {
-      id,
-      title: input.title.trim(),
-      description: input.description.trim() || null,
-      location: input.location.trim() || null,
-      meeting_link: input.meeting_link.trim() || null,
-      start_at: occ.start.toISOString(),
-      end_at: occ.end ? occ.end.toISOString() : null,
-      created_by: input.created_by,
-      recurrence: input.recurrence,
-      minutes: null,
-      participant_ids: input.participant_ids,
-      created_at: now,
-      updated_at: now,
-    };
-    await firestore.collection("meetings").doc(id).set(data);
-    created.push(mapMeetingData(data));
+    await dbq`INSERT INTO meetings
+      (id, title, description, location, meeting_link, start_at, end_at, created_by, recurrence, minutes, created_at, updated_at)
+      VALUES (${id}, ${input.title.trim()}, ${input.description.trim() || null}, ${input.location.trim() || null},
+        ${input.meeting_link.trim() || null}, ${occ.start.toISOString()}, ${occ.end ? occ.end.toISOString() : null},
+        ${input.created_by}, ${input.recurrence}, NULL, ${now}, ${now})`;
+    if (input.participant_ids.length > 0) {
+      await dbq.query(
+        `INSERT INTO meeting_participants (meeting_id, profile_id)
+         SELECT $1, pid FROM unnest($2::text[]) AS pid`,
+        [id, input.participant_ids]
+      );
+    }
+    created.push(mapMeetingRow({ id, title: input.title.trim(), description: input.description.trim() || null, location: input.location.trim() || null, meeting_link: input.meeting_link.trim() || null, start_at: occ.start.toISOString(), end_at: occ.end ? occ.end.toISOString() : null, created_by: input.created_by, recurrence: input.recurrence, minutes: null, created_at: now, updated_at: now }));
   }
   return created;
 }
@@ -1106,87 +950,66 @@ export async function updateMeeting(
     participant_ids: string[];
   }
 ): Promise<{ error?: string }> {
-  await (await db())
-    .collection("meetings")
-    .doc(id)
-    .update({
-      title: input.title.trim(),
-      description: input.description.trim() || null,
-      location: input.location.trim() || null,
-      meeting_link: input.meeting_link.trim() || null,
-      start_at: input.start_at,
-      end_at: input.end_at,
-      participant_ids: input.participant_ids,
-      updated_at: new Date().toISOString(),
-    });
+  const dbq = await db();
+  await dbq`UPDATE meetings SET title = ${input.title.trim()}, description = ${input.description.trim() || null},
+    location = ${input.location.trim() || null}, meeting_link = ${input.meeting_link.trim() || null},
+    start_at = ${input.start_at}, end_at = ${input.end_at}, updated_at = ${new Date().toISOString()}
+    WHERE id = ${id}`;
+  await dbq`DELETE FROM meeting_participants WHERE meeting_id = ${id}`;
+  if (input.participant_ids.length > 0) {
+    await dbq.query(
+      `INSERT INTO meeting_participants (meeting_id, profile_id)
+       SELECT $1, pid FROM unnest($2::text[]) AS pid`,
+      [id, input.participant_ids]
+    );
+  }
   return {};
 }
 
 export async function saveMeetingMinutes(id: string, minutes: string): Promise<void> {
-  await (await db())
-    .collection("meetings")
-    .doc(id)
-    .update({ minutes: minutes.trim() || null, updated_at: new Date().toISOString() });
+  await (await db())`UPDATE meetings SET minutes = ${minutes.trim() || null}, updated_at = ${new Date().toISOString()} WHERE id = ${id}`;
 }
 
 export async function deleteMeeting(id: string): Promise<void> {
-  const firestore = await db();
-  const attachSnap = await firestore.collection("meetingAttachments").where("meeting_id", "==", id).get();
-  await Promise.all(
-    attachSnap.docs.map((d) => getBucket().file(`meeting-attachments/${d.id}`).delete({ ignoreNotFound: true }))
-  );
-  if (!attachSnap.empty) {
-    const batch = firestore.batch();
-    attachSnap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-  await firestore.collection("meetings").doc(id).delete();
+  const dbq = await db();
+  await dbq`DELETE FROM meeting_attachments WHERE meeting_id = ${id}`;
+  await dbq`DELETE FROM meeting_participants WHERE meeting_id = ${id}`;
+  await dbq`DELETE FROM meetings WHERE id = ${id}`;
 }
 
 export async function getMeetingById(id: string): Promise<Meeting | null> {
-  const snap = await (await db()).collection("meetings").doc(id).get();
-  return snap.exists ? mapMeetingData(snap.data()!) : null;
+  const rows = await (await db())`SELECT * FROM meetings WHERE id = ${id}`;
+  return rows.length ? mapMeetingRow(rows[0]) : null;
 }
 
 export async function listMeetingParticipants(meetingId: string): Promise<MeetingParticipant[]> {
-  const firestore = await db();
-  const meetingSnap = await firestore.collection("meetings").doc(meetingId).get();
-  const participantIds: string[] = meetingSnap.exists ? meetingSnap.data()!.participant_ids ?? [] : [];
-  if (participantIds.length === 0) return [];
-
-  const profiles = await Promise.all(participantIds.map((pid) => firestore.collection("profiles").doc(pid).get()));
-  return profiles
-    .filter((p) => p.exists)
-    .map((p) => ({ meeting_id: meetingId, profile_id: p.id, full_name: p.data()!.full_name }))
-    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const rows = await (await db())`SELECT mp.profile_id, p.full_name FROM meeting_participants mp
+    JOIN profiles p ON p.id = mp.profile_id WHERE mp.meeting_id = ${meetingId} ORDER BY p.full_name`;
+  return rows.map((r) => ({ meeting_id: meetingId, profile_id: r.profile_id, full_name: r.full_name }));
 }
 
 /** Réunions à venir/passées visibles par un profil : celles qu'il a créées ou
  * auxquelles il est invité. Les admins voient toutes les réunions. */
 export async function listMeetingsFor(profile: Profile): Promise<Meeting[]> {
-  const firestore = await db();
-  if (profile.role === "admin") {
-    const snap = await firestore.collection("meetings").get();
-    return snap.docs.map((d) => mapMeetingData(d.data())).sort((a, b) => b.start_at.localeCompare(a.start_at));
-  }
-
-  const [createdSnap, invitedSnap] = await Promise.all([
-    firestore.collection("meetings").where("created_by", "==", profile.id).get(),
-    firestore.collection("meetings").where("participant_ids", "array-contains", profile.id).get(),
-  ]);
-  const byId = new Map<string, Meeting>();
-  [...createdSnap.docs, ...invitedSnap.docs].forEach((d) => byId.set(d.id, mapMeetingData(d.data())));
-  return [...byId.values()].sort((a, b) => b.start_at.localeCompare(a.start_at));
+  const dbq = await db();
+  const rows =
+    profile.role === "admin"
+      ? await dbq`SELECT * FROM meetings ORDER BY start_at DESC`
+      : await dbq`SELECT DISTINCT m.* FROM meetings m
+          LEFT JOIN meeting_participants mp ON mp.meeting_id = m.id
+          WHERE m.created_by = ${profile.id} OR mp.profile_id = ${profile.id}
+          ORDER BY m.start_at DESC`;
+  return rows.map(mapMeetingRow);
 }
 
-function mapMeetingAttachmentData(id: string, data: FirebaseFirestore.DocumentData): MeetingAttachment & { meeting_id: string } {
+function mapMeetingAttachmentRow(r: Row): MeetingAttachment & { meeting_id: string } {
   return {
-    id,
-    meeting_id: data.meeting_id,
-    original_name: data.original_name,
-    mime_type: data.mime_type,
-    size: Number(data.size),
-    uploaded_at: data.uploaded_at,
+    id: r.id,
+    meeting_id: r.meeting_id,
+    original_name: r.original_name,
+    mime_type: r.mime_type,
+    size: Number(r.size),
+    uploaded_at: toIso(r.uploaded_at),
   };
 }
 
@@ -1201,126 +1024,104 @@ export interface CreateMeetingAttachmentInput {
 export async function createMeetingAttachment(input: CreateMeetingAttachmentInput): Promise<MeetingAttachment> {
   const id = generateId();
   const now = new Date().toISOString();
-  await getBucket().file(`meeting-attachments/${id}`).save(input.buffer, { contentType: input.mime_type });
-  const data = {
-    meeting_id: input.meeting_id,
-    original_name: input.original_name,
-    mime_type: input.mime_type,
-    size: input.size,
-    uploaded_at: now,
-  };
-  await (await db()).collection("meetingAttachments").doc(id).set(data);
-  return mapMeetingAttachmentData(id, data);
+  await (await db())`INSERT INTO meeting_attachments
+    (id, meeting_id, original_name, mime_type, size, uploaded_at, content)
+    VALUES (${id}, ${input.meeting_id}, ${input.original_name}, ${input.mime_type}, ${input.size}, ${now}, ${input.buffer})`;
+  return mapMeetingAttachmentRow({ id, meeting_id: input.meeting_id, original_name: input.original_name, mime_type: input.mime_type, size: input.size, uploaded_at: now });
 }
 
 export async function listMeetingAttachments(meetingId: string): Promise<MeetingAttachment[]> {
-  const snap = await (await db()).collection("meetingAttachments").where("meeting_id", "==", meetingId).get();
-  return snap.docs
-    .map((d) => mapMeetingAttachmentData(d.id, d.data()))
-    .sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+  const rows = await (await db())`SELECT id, meeting_id, original_name, mime_type, size, uploaded_at
+    FROM meeting_attachments WHERE meeting_id = ${meetingId} ORDER BY uploaded_at DESC`;
+  return rows.map(mapMeetingAttachmentRow);
 }
 
 export async function getMeetingAttachmentById(id: string): Promise<(MeetingAttachment & { meeting_id: string }) | null> {
-  const snap = await (await db()).collection("meetingAttachments").doc(id).get();
-  return snap.exists ? mapMeetingAttachmentData(id, snap.data()!) : null;
+  const rows = await (await db())`SELECT id, meeting_id, original_name, mime_type, size, uploaded_at FROM meeting_attachments WHERE id = ${id}`;
+  return rows.length ? mapMeetingAttachmentRow(rows[0]) : null;
 }
 
 export async function getMeetingAttachmentContent(
   id: string
 ): Promise<{ content: Buffer; mime_type: string; original_name: string } | null> {
-  const snap = await (await db()).collection("meetingAttachments").doc(id).get();
-  if (!snap.exists) return null;
-  const data = snap.data()!;
-  const [content] = await getBucket().file(`meeting-attachments/${id}`).download();
-  return { content, mime_type: data.mime_type, original_name: data.original_name };
+  const rows = await (await db())`SELECT content, mime_type, original_name FROM meeting_attachments WHERE id = ${id}`;
+  if (rows.length === 0 || !rows[0].content) return null;
+  const content = Buffer.isBuffer(rows[0].content) ? rows[0].content : Buffer.from(rows[0].content, "base64");
+  return { content, mime_type: rows[0].mime_type, original_name: rows[0].original_name };
 }
 
 export async function deleteMeetingAttachment(id: string): Promise<void> {
-  await getBucket().file(`meeting-attachments/${id}`).delete({ ignoreNotFound: true });
-  await (await db()).collection("meetingAttachments").doc(id).delete();
+  await (await db())`DELETE FROM meeting_attachments WHERE id = ${id}`;
 }
 
 // --- Messagerie interne --------------------------------------------------------
 
-function mapMessageData(data: FirebaseFirestore.DocumentData, viewerReadField: "recipient" | string): Message {
-  const readBy: string[] = data.read_by ?? [];
-  const readTarget = viewerReadField === "recipient" ? data.recipient_id : viewerReadField;
+function mapMessageRow(r: Row, viewerReadField: "recipient" | string): Message {
+  const readBy: string[] = r.read_by ?? [];
+  const readTarget = viewerReadField === "recipient" ? r.recipient_id : viewerReadField;
   return {
-    id: data.id,
-    sender_id: data.sender_id,
-    sender_name: data.sender_name,
-    recipient_id: data.recipient_id ?? null,
-    body: data.body,
-    created_at: data.created_at,
+    id: r.id,
+    sender_id: r.sender_id,
+    sender_name: r.sender_name ?? "",
+    recipient_id: r.recipient_id ?? null,
+    body: r.body,
+    created_at: toIso(r.created_at),
     read: readTarget ? readBy.includes(readTarget) : false,
   };
 }
 
 export async function sendMessage(input: { sender_id: string; recipient_id: string | null; body: string }): Promise<Message> {
-  const firestore = await db();
-  const senderSnap = await firestore.collection("profiles").doc(input.sender_id).get();
-  const senderName = senderSnap.exists ? senderSnap.data()!.full_name : "";
+  const dbq = await db();
+  const senders = await dbq`SELECT full_name FROM profiles WHERE id = ${input.sender_id}`;
+  const senderName = senders.length ? senders[0].full_name : "";
+  const participantIds = input.recipient_id ? [input.sender_id, input.recipient_id] : [input.sender_id];
 
   const id = generateId();
-  const data = {
-    id,
-    sender_id: input.sender_id,
-    sender_name: senderName,
-    recipient_id: input.recipient_id,
-    body: input.body.trim(),
-    created_at: new Date().toISOString(),
-    is_broadcast: input.recipient_id === null,
-    participant_ids: input.recipient_id ? [input.sender_id, input.recipient_id] : [input.sender_id],
-    read_by: [] as string[],
-  };
-  await firestore.collection("messages").doc(id).set(data);
-  return mapMessageData(data, "recipient");
+  const now = new Date().toISOString();
+  await dbq`INSERT INTO messages (id, sender_id, sender_name, recipient_id, body, created_at, is_broadcast, participant_ids, read_by)
+    VALUES (${id}, ${input.sender_id}, ${senderName}, ${input.recipient_id}, ${input.body.trim()}, ${now},
+      ${input.recipient_id === null}, ${participantIds}, ${[]})`;
+  return mapMessageRow({ id, sender_id: input.sender_id, sender_name: senderName, recipient_id: input.recipient_id, body: input.body.trim(), created_at: now, read_by: [] }, "recipient");
 }
 
 /** Annonces diffusées à tous les employés (recipient_id IS NULL). */
 export async function listBroadcastMessages(viewerId: string, limit = 50): Promise<Message[]> {
-  const snap = await (await db()).collection("messages").where("is_broadcast", "==", true).get();
-  return snap.docs
-    .map((d) => d.data())
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, limit)
-    .map((d) => mapMessageData(d, viewerId));
+  const rows = await (await db())`SELECT * FROM messages WHERE is_broadcast = true ORDER BY created_at DESC LIMIT ${limit}`;
+  return rows.map((r) => mapMessageRow(r, viewerId));
 }
 
 /** Conversation directe (dans les deux sens) entre deux comptes. */
 export async function listConversation(a: string, b: string, limit = 100): Promise<Message[]> {
-  const snap = await (await db()).collection("messages").where("participant_ids", "array-contains", a).get();
-  return snap.docs
-    .map((d) => d.data())
-    .filter(
-      (d) => !d.is_broadcast && ((d.sender_id === a && d.recipient_id === b) || (d.sender_id === b && d.recipient_id === a))
-    )
-    .sort((x, y) => x.created_at.localeCompare(y.created_at))
-    .slice(0, limit)
-    .map((d) => mapMessageData(d, "recipient"));
+  const rows = await (await db())`SELECT * FROM messages
+    WHERE is_broadcast = false AND ((sender_id = ${a} AND recipient_id = ${b}) OR (sender_id = ${b} AND recipient_id = ${a}))
+    ORDER BY created_at LIMIT ${limit}`;
+  return rows.map((r) => mapMessageRow(r, "recipient"));
 }
 
 /** Liste des interlocuteurs avec qui l'utilisateur a échangé, triée par dernier message. */
 export async function listConversationsFor(profileId: string): Promise<ConversationSummary[]> {
-  const firestore = await db();
-  const snap = await firestore.collection("messages").where("participant_ids", "array-contains", profileId).get();
-  const direct = snap.docs.map((d) => d.data()).filter((d) => !d.is_broadcast);
+  const dbq = await db();
+  const rows = await dbq`SELECT * FROM messages
+    WHERE is_broadcast = false AND ${profileId} = ANY(participant_ids)`;
 
-  const byOther = new Map<string, FirebaseFirestore.DocumentData[]>();
-  for (const m of direct) {
+  const byOther = new Map<string, Row[]>();
+  for (const m of rows) {
     const other = m.sender_id === profileId ? m.recipient_id : m.sender_id;
     if (!byOther.has(other)) byOther.set(other, []);
     byOther.get(other)!.push(m);
   }
 
-  const otherIds = [...byOther.keys()];
-  const profiles = await Promise.all(otherIds.map((id) => firestore.collection("profiles").doc(id).get()));
-  const nameById = new Map(profiles.filter((p) => p.exists).map((p) => [p.id, p.data()!.full_name as string]));
+  const otherIds = [...byOther.keys()].filter(Boolean);
+  const nameById = new Map<string, string>();
+  if (otherIds.length > 0) {
+    const profiles = await dbq.query(`SELECT id, full_name FROM profiles WHERE id = ANY($1)`, [otherIds]);
+    for (const p of profiles) nameById.set(p.id, p.full_name);
+  }
 
   const summaries: ConversationSummary[] = otherIds
     .filter((id) => nameById.has(id))
     .map((otherId) => {
-      const msgs = byOther.get(otherId)!.sort((x, y) => y.created_at.localeCompare(x.created_at));
+      const msgs = byOther.get(otherId)!.sort((x, y) => toIso(y.created_at).localeCompare(toIso(x.created_at)));
       const last = msgs[0];
       const unread = msgs.filter(
         (m) => m.recipient_id === profileId && !(m.read_by ?? []).includes(profileId)
@@ -1329,7 +1130,7 @@ export async function listConversationsFor(profileId: string): Promise<Conversat
         profile_id: otherId,
         full_name: nameById.get(otherId)!,
         last_message: last.body,
-        last_at: last.created_at,
+        last_at: toIso(last.created_at),
         unread,
       };
     });
@@ -1338,48 +1139,23 @@ export async function listConversationsFor(profileId: string): Promise<Conversat
 }
 
 export async function markConversationRead(viewerId: string, otherId: string): Promise<void> {
-  const firestore = await db();
-  const snap = await firestore.collection("messages").where("participant_ids", "array-contains", viewerId).get();
-  const toUpdate = snap.docs.filter((d) => {
-    const data = d.data();
-    return (
-      !data.is_broadcast &&
-      data.sender_id === otherId &&
-      data.recipient_id === viewerId &&
-      !(data.read_by ?? []).includes(viewerId)
-    );
-  });
-  if (toUpdate.length === 0) return;
-  const batch = firestore.batch();
-  toUpdate.forEach((d) => batch.update(d.ref, { read_by: FieldValue.arrayUnion(viewerId) }));
-  await batch.commit();
+  await (await db())`UPDATE messages SET read_by = array_append(read_by, ${viewerId})
+    WHERE is_broadcast = false AND sender_id = ${otherId} AND recipient_id = ${viewerId}
+      AND NOT (${viewerId} = ANY(read_by))`;
 }
 
 export async function markBroadcastRead(viewerId: string): Promise<void> {
-  const firestore = await db();
-  const snap = await firestore.collection("messages").where("is_broadcast", "==", true).get();
-  const toUpdate = snap.docs.filter((d) => !(d.data().read_by ?? []).includes(viewerId));
-  if (toUpdate.length === 0) return;
-  const batch = firestore.batch();
-  toUpdate.forEach((d) => batch.update(d.ref, { read_by: FieldValue.arrayUnion(viewerId) }));
-  await batch.commit();
+  await (await db())`UPDATE messages SET read_by = array_append(read_by, ${viewerId})
+    WHERE is_broadcast = true AND NOT (${viewerId} = ANY(read_by))`;
 }
 
 export async function countUnreadMessages(profileId: string): Promise<number> {
-  const firestore = await db();
-  const [directSnap, broadcastSnap] = await Promise.all([
-    firestore.collection("messages").where("participant_ids", "array-contains", profileId).get(),
-    firestore.collection("messages").where("is_broadcast", "==", true).get(),
-  ]);
-  const unreadDirect = directSnap.docs.filter((d) => {
-    const data = d.data();
-    return data.recipient_id === profileId && !(data.read_by ?? []).includes(profileId);
-  }).length;
-  const unreadBroadcast = broadcastSnap.docs.filter((d) => {
-    const data = d.data();
-    return data.sender_id !== profileId && !(data.read_by ?? []).includes(profileId);
-  }).length;
-  return unreadDirect + unreadBroadcast;
+  const rows = await (await db())`SELECT count(*)::int AS n FROM messages
+    WHERE NOT (${profileId} = ANY(read_by)) AND (
+      (is_broadcast = false AND recipient_id = ${profileId}) OR
+      (is_broadcast = true AND sender_id <> ${profileId})
+    )`;
+  return Number(rows[0].n);
 }
 
 // --- Import d'heures historiques (CSV) -----------------------------------------
@@ -1429,37 +1205,31 @@ export interface ImportedEntryRow extends TimeEntry {
 /** Toutes les entrées marquées comme issues d'un import de fichier, jointes au
  * profil de l'employé, triées de la plus récente à la plus ancienne. */
 export async function listImportedEntries(limit = 500): Promise<ImportedEntryRow[]> {
-  const snap = await (await db()).collection("timeEntries").where("imported", "==", true).get();
-  const profiles = new Map((await listAllAccounts()).map((p) => [p.id, p]));
-  return snap.docs
-    .map((d) => {
-      const entry = mapTimeEntryData(d.data());
-      const p = profiles.get(entry.profile_id);
-      return { ...entry, full_name: p?.full_name ?? "(compte supprimé)", email: p?.email ?? "" };
-    })
-    .sort((a, b) => b.entry_date.localeCompare(a.entry_date))
-    .slice(0, limit);
+  const rows = await (await db())`SELECT t.*, COALESCE(p.full_name, '(compte supprimé)') AS full_name, COALESCE(p.email, '') AS email
+    FROM time_entries t LEFT JOIN profiles p ON p.id = t.profile_id
+    WHERE t.imported = true ORDER BY t.entry_date DESC LIMIT ${limit}`;
+  return rows.map((r) => ({ ...mapTimeEntryRow(r), full_name: r.full_name, email: r.email }));
 }
 
 // --- Import par scan OCR (feuille de présence papier) --------------------------
 
-function mapOcrDraftData(data: FirebaseFirestore.DocumentData): OcrDraftRow {
+function mapOcrDraftRow(r: Row): OcrDraftRow {
   return {
-    id: data.id,
-    batch_id: data.batch_id,
-    document_id: data.document_id ?? null,
-    profile_id: data.profile_id ?? null,
-    full_name: data.full_name ?? null,
-    entry_date: data.entry_date ?? null,
-    start_time: data.start_time ?? null,
-    end_time: data.end_time ?? null,
-    break_minutes: Number(data.break_minutes ?? 0),
-    hours: Number(data.hours ?? 0),
-    raw_line: data.raw_line ?? "",
-    valid: !!data.valid,
-    issues: Array.isArray(data.issues) ? data.issues : [],
-    status: data.status,
-    created_at: data.created_at,
+    id: r.id,
+    batch_id: r.batch_id,
+    document_id: r.document_id ?? null,
+    profile_id: r.profile_id ?? null,
+    full_name: r.full_name ?? null,
+    entry_date: r.entry_date ?? null,
+    start_time: r.start_time ?? null,
+    end_time: r.end_time ?? null,
+    break_minutes: Number(r.break_minutes ?? 0),
+    hours: Number(r.hours ?? 0),
+    raw_line: r.raw_line ?? "",
+    valid: !!r.valid,
+    issues: Array.isArray(r.issues) ? r.issues : [],
+    status: r.status,
+    created_at: toIso(r.created_at),
   };
 }
 
@@ -1482,30 +1252,32 @@ export interface CreateOcrDraftRowInput {
  * par un administrateur : rien n'est fusionné dans l'historique des heures à ce stade. */
 export async function createOcrDraftRows(rows: CreateOcrDraftRowInput[]): Promise<OcrDraftRow[]> {
   if (rows.length === 0) return [];
-  const firestore = await db();
+  const dbq = await db();
   const now = new Date().toISOString();
-  const batch = firestore.batch();
   const created: OcrDraftRow[] = [];
 
   for (const r of rows) {
     const id = generateId();
-    const data = { id, ...r, status: "pending" as OcrDraftStatus, created_at: now };
-    batch.set(firestore.collection("ocrDrafts").doc(id), data);
-    created.push(mapOcrDraftData(data));
+    await dbq`INSERT INTO ocr_drafts
+      (id, batch_id, document_id, profile_id, full_name, entry_date, start_time, end_time, break_minutes, hours, raw_line, valid, issues, status, created_at)
+      VALUES (${id}, ${r.batch_id}, ${r.document_id}, ${r.profile_id}, ${r.full_name}, ${r.entry_date},
+        ${r.start_time}, ${r.end_time}, ${r.break_minutes}, ${r.hours}, ${r.raw_line}, ${r.valid}, ${r.issues}, 'pending', ${now})`;
+    created.push(mapOcrDraftRow({ id, ...r, status: "pending", created_at: now }));
   }
-  await batch.commit();
   return created;
 }
 
 export async function listOcrDrafts(status?: OcrDraftStatus): Promise<OcrDraftRow[]> {
-  const base = (await db()).collection("ocrDrafts");
-  const snap = await (status ? base.where("status", "==", status) : base).get();
-  return snap.docs.map((d) => mapOcrDraftData(d.data())).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const dbq = await db();
+  const rows = status
+    ? await dbq`SELECT * FROM ocr_drafts WHERE status = ${status} ORDER BY created_at DESC`
+    : await dbq`SELECT * FROM ocr_drafts ORDER BY created_at DESC`;
+  return rows.map(mapOcrDraftRow);
 }
 
 export async function getOcrDraftById(id: string): Promise<OcrDraftRow | null> {
-  const snap = await (await db()).collection("ocrDrafts").doc(id).get();
-  return snap.exists ? mapOcrDraftData(snap.data()!) : null;
+  const rows = await (await db())`SELECT * FROM ocr_drafts WHERE id = ${id}`;
+  return rows.length ? mapOcrDraftRow(rows[0]) : null;
 }
 
 export interface UpdateOcrDraftInput {
@@ -1522,15 +1294,23 @@ export interface UpdateOcrDraftInput {
 
 /** Permet à l'admin de corriger une ligne (employé, date, heures) avant de la confirmer. */
 export async function updateOcrDraft(id: string, fields: UpdateOcrDraftInput): Promise<void> {
-  await (await db()).collection("ocrDrafts").doc(id).update(fields as Record<string, unknown>);
+  const dbq = await db();
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    setClauses.push(`${key} = $${i++}`);
+    params.push(value);
+  }
+  if (setClauses.length === 0) return;
+  params.push(id);
+  await dbq.query(`UPDATE ocr_drafts SET ${setClauses.join(", ")} WHERE id = $${i}`, params);
 }
 
 export async function setOcrDraftStatus(ids: string[], status: OcrDraftStatus): Promise<void> {
   if (ids.length === 0) return;
-  const firestore = await db();
-  const batch = firestore.batch();
-  for (const id of ids) batch.update(firestore.collection("ocrDrafts").doc(id), { status });
-  await batch.commit();
+  await (await db())`UPDATE ocr_drafts SET status = ${status} WHERE id = ANY(${ids})`;
 }
 
 /**
@@ -1565,47 +1345,30 @@ const RESET_TOKEN_DURATION_MS = 60 * 60 * 1000; // 1 heure
 
 /** Crée un jeton de réinitialisation à usage unique et invalide les précédents. */
 export async function createPasswordReset(profileId: string): Promise<string> {
-  const firestore = await db();
-  const existingSnap = await firestore.collection("passwordResets").where("profile_id", "==", profileId).get();
-  const unused = existingSnap.docs.filter((d) => !d.data().used);
-  if (unused.length > 0) {
-    const batch = firestore.batch();
-    unused.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-
+  const dbq = await db();
+  await dbq`DELETE FROM password_resets WHERE profile_id = ${profileId} AND used = false`;
   const token = generateId();
-  await firestore.collection("passwordResets").doc(token).set({
-    profile_id: profileId,
-    expires: Date.now() + RESET_TOKEN_DURATION_MS,
-    used: false,
-    created_at: new Date().toISOString(),
-  });
+  await dbq`INSERT INTO password_resets (token, profile_id, expires, used, created_at)
+    VALUES (${token}, ${profileId}, ${Date.now() + RESET_TOKEN_DURATION_MS}, false, ${new Date().toISOString()})`;
   return token;
 }
 
 export async function findValidPasswordReset(token: string): Promise<{ profile_id: string } | null> {
-  const snap = await (await db()).collection("passwordResets").doc(token).get();
-  if (!snap.exists) return null;
-  const data = snap.data()!;
-  if (data.used || data.expires < Date.now()) return null;
-  return { profile_id: data.profile_id };
+  const rows = await (await db())`SELECT profile_id, expires, used FROM password_resets WHERE token = ${token}`;
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  if (r.used || Number(r.expires) < Date.now()) return null;
+  return { profile_id: r.profile_id };
 }
 
 /** Applique le nouveau mot de passe, consomme le jeton et déconnecte toutes les sessions actives. */
 export async function resetPasswordWithToken(token: string, newPassword: string): Promise<{ error?: string }> {
-  const firestore = await db();
+  const dbq = await db();
   const reset = await findValidPasswordReset(token);
   if (!reset) return { error: "Ce lien de réinitialisation est invalide ou a expiré." };
 
-  await firestore.collection("profiles").doc(reset.profile_id).update({ password_hash: hashPassword(newPassword) });
-  await firestore.collection("passwordResets").doc(token).update({ used: true });
-
-  const sessionsSnap = await firestore.collection("sessions").where("profile_id", "==", reset.profile_id).get();
-  if (!sessionsSnap.empty) {
-    const batch = firestore.batch();
-    sessionsSnap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
+  await dbq`UPDATE profiles SET password_hash = ${hashPassword(newPassword)} WHERE id = ${reset.profile_id}`;
+  await dbq`UPDATE password_resets SET used = true WHERE token = ${token}`;
+  await dbq`DELETE FROM sessions WHERE profile_id = ${reset.profile_id}`;
   return {};
 }
